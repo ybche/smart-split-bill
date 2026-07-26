@@ -1,0 +1,6 @@
+{
+  "name": "Smart Split Bill",
+  "description": "An end-to-end expense allocation, payment collection, and verification platform with WhatsApp reminder integration.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
