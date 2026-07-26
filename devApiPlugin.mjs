@@ -9,74 +9,36 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API_DIR = path.join(__dirname, "api");
 
-// Dynamic segment names must not contain another bracket or a dot, so these
-// patterns don't accidentally also match catch-all filenames like
-// "[...slug].ts" or "[[...slug]].ts".
-const SINGLE_DYNAMIC_FILE_RE = /^\[([^.[\]]+)\]\.ts$/;
-const SINGLE_DYNAMIC_DIR_RE = /^\[([^.[\]]+)\]$/;
-const CATCH_ALL_FILE_RE = /^\[\.\.\.(.+)\]\.ts$/;
-const OPTIONAL_CATCH_ALL_FILE_RE = /^\[\[\.\.\.(.+)\]\]\.ts$/;
+// Groups consolidated behind a single api/<group>/_handler.ts file (see
+// vercel.json's rewrites and lib/routeSlug.ts). Every request under one of
+// these is routed straight to that file, with everything after the group
+// name passed through as the "slug" query param — mirroring how Vercel's
+// rewrites pass it in production, since a real bracket-based catch-all file
+// only ever matched a single path segment deep on that platform.
+const HANDLER_GROUPS = [
+  "categories",
+  "transactions",
+  "participants",
+  "payments",
+  "payment-methods",
+  "admins",
+  "auth",
+  "db",
+  "public",
+];
 
-function resolveApiFile(baseDir, segments, params) {
-  let entries;
-  try {
-    entries = fs.readdirSync(baseDir, { withFileTypes: true });
-  } catch {
-    return null;
-  }
-
-  if (segments.length === 0) {
-    const indexFile = path.join(baseDir, "index.ts");
-    if (fs.existsSync(indexFile)) return { file: indexFile, params };
-
-    const optionalCatchAllFile = entries.find((e) => e.isFile() && OPTIONAL_CATCH_ALL_FILE_RE.test(e.name));
-    if (optionalCatchAllFile) {
-      const paramName = optionalCatchAllFile.name.match(OPTIONAL_CATCH_ALL_FILE_RE)[1];
-      return { file: path.join(baseDir, optionalCatchAllFile.name), params: { ...params, [paramName]: [] } };
-    }
-    return null;
-  }
-
-  const [seg, ...rest] = segments;
-
-  if (rest.length === 0) {
-    const exactFile = path.join(baseDir, `${seg}.ts`);
-    if (fs.existsSync(exactFile)) return { file: exactFile, params };
-  }
-
-  const exactDir = entries.find((e) => e.isDirectory() && e.name === seg);
-  if (exactDir) {
-    const result = resolveApiFile(path.join(baseDir, seg), rest, params);
-    if (result) return result;
-  }
-
-  if (rest.length === 0) {
-    const dynFile = entries.find((e) => e.isFile() && SINGLE_DYNAMIC_FILE_RE.test(e.name));
-    if (dynFile) {
-      const paramName = dynFile.name.match(SINGLE_DYNAMIC_FILE_RE)[1];
-      return { file: path.join(baseDir, dynFile.name), params: { ...params, [paramName]: seg } };
+function resolveApiFile(segments) {
+  if (segments.length >= 1 && HANDLER_GROUPS.includes(segments[0])) {
+    const handlerFile = path.join(API_DIR, segments[0], "_handler.ts");
+    if (fs.existsSync(handlerFile)) {
+      return { file: handlerFile, params: { slug: segments.slice(1) } };
     }
   }
 
-  const dynDir = entries.find((e) => e.isDirectory() && SINGLE_DYNAMIC_DIR_RE.test(e.name));
-  if (dynDir) {
-    const paramName = dynDir.name.match(SINGLE_DYNAMIC_DIR_RE)[1];
-    const result = resolveApiFile(path.join(baseDir, dynDir.name), rest, { ...params, [paramName]: seg });
-    if (result) return result;
-  }
-
-  // Catch-all (required): [...param].ts — consumes ALL remaining segments.
-  const catchAllFile = entries.find((e) => e.isFile() && CATCH_ALL_FILE_RE.test(e.name));
-  if (catchAllFile) {
-    const paramName = catchAllFile.name.match(CATCH_ALL_FILE_RE)[1];
-    return { file: path.join(baseDir, catchAllFile.name), params: { ...params, [paramName]: segments } };
-  }
-
-  // Optional catch-all: [[...param]].ts — also matches when segments remain.
-  const optionalCatchAllFile = entries.find((e) => e.isFile() && OPTIONAL_CATCH_ALL_FILE_RE.test(e.name));
-  if (optionalCatchAllFile) {
-    const paramName = optionalCatchAllFile.name.match(OPTIONAL_CATCH_ALL_FILE_RE)[1];
-    return { file: path.join(baseDir, optionalCatchAllFile.name), params: { ...params, [paramName]: segments } };
+  // Flat, non-dynamic files (activities.ts, scan-receipt.ts, ...).
+  if (segments.length === 1) {
+    const exactFile = path.join(API_DIR, `${segments[0]}.ts`);
+    if (fs.existsSync(exactFile)) return { file: exactFile, params: {} };
   }
 
   return null;
@@ -100,12 +62,6 @@ function readJsonBody(req) {
   });
 }
 
-// Mirrors vercel.json's rewrites: Vercel's file-system router does not match
-// a bare "/api/<group>" path against that group's catch-all segment file, so
-// production rewrites it to "/api/<group>/_index" first. Replicated here so
-// local dev hits the same code path as production.
-const BARE_ROUTE_GROUPS = ["categories", "transactions", "participants", "payments", "payment-methods", "admins"];
-
 /** @returns {import('vite').Plugin} */
 export default function devApiPlugin() {
   return {
@@ -116,12 +72,9 @@ export default function devApiPlugin() {
         if (!req.url || !req.url.startsWith("/api/")) return next();
 
         const urlObj = new URL(req.url, "http://localhost");
-        let segments = urlObj.pathname.replace(/^\/api\//, "").split("/").filter(Boolean);
-        if (segments.length === 1 && BARE_ROUTE_GROUPS.includes(segments[0])) {
-          segments = [...segments, "_index"];
-        }
+        const segments = urlObj.pathname.replace(/^\/api\//, "").split("/").filter(Boolean);
 
-        const resolved = resolveApiFile(API_DIR, segments, {});
+        const resolved = resolveApiFile(segments);
         if (!resolved) {
           res.statusCode = 404;
           res.setHeader("Content-Type", "application/json");

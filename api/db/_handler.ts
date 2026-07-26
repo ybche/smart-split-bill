@@ -66,7 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
 
-  const slug = getSlug(req, "db");
+  const slug = getSlug(req);
 
   if (slug.length === 1 && slug[0] === "export") {
     if (req.method !== "GET") return res.status(405).json({ error: "Metode tidak diizinkan" });

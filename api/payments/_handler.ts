@@ -18,12 +18,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
 
-  const slug = getSlug(req, "payments");
+  const slug = getSlug(req);
 
-  // Vercel's file-system router does not match the bare "/api/payments"
-  // path against a catch-all segment file, so vercel.json rewrites it to
-  // "/api/payments/_index" instead — treat that the same as no segments.
-  if (slug.length === 0 || (slug.length === 1 && slug[0] === "_index")) {
+  if (slug.length === 0) {
     if (req.method !== "GET") return res.status(405).json({ error: "Metode tidak diizinkan" });
 
     const [{ data: submissions, error: subError }, { data: participants }, { data: categories }, { data: allocations }] = await Promise.all([

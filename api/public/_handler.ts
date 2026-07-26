@@ -20,7 +20,7 @@ const TYPE_LABELS: Record<string, string> = { bank: "Bank Account", wallet: "E-W
 //   ["pay-portal" | "pay", token]        -> GET
 //   ["pay-portal" | "pay", token, "declare"] -> POST
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const slug = getSlug(req, "public");
+  const slug = getSlug(req);
   const route = slug[0];
 
   if (slug.length === 1 && route === "payment-methods") {

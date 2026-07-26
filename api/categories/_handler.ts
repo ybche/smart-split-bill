@@ -9,8 +9,9 @@ import { getOrCreateParticipantToken } from "../../lib/categoryParticipantSync.j
 import { getSlug } from "../../lib/routeSlug.js";
 
 // Consolidates every /api/categories/* route into a single serverless
-// function (Vercel Hobby caps a deployment at 12 functions) via an optional
-// catch-all segment. Routes below by [...slug] instead of one file per path:
+// function (Vercel Hobby caps a deployment at 12 functions). vercel.json
+// rewrites every sub-path here as a "slug" query param (see lib/routeSlug.ts);
+// dispatches by that instead of one file per path:
 //   []                                              -> GET / POST
 //   [id]                                             -> PUT / DELETE
 //   [id, "details"]                                  -> GET
@@ -20,12 +21,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
 
-  const slug = getSlug(req, "categories");
+  const slug = getSlug(req);
 
-  // Vercel's file-system router does not match the bare "/api/categories"
-  // path against a catch-all segment file, so vercel.json rewrites it to
-  // "/api/categories/_index" instead — treat that the same as no segments.
-  if (slug.length === 0 || (slug.length === 1 && slug[0] === "_index")) {
+  if (slug.length === 0) {
     if (req.method === "GET") {
       const { data, error } = await supabaseAdmin.from("categories").select("*").order("created_at", { ascending: false });
       if (error) return res.status(500).json({ error: error.message });

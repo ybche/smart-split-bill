@@ -14,7 +14,7 @@ import { getSlug } from "../../lib/routeSlug.js";
 //   ["me"]               -> GET, admin
 //   ["settings"]         -> PUT, admin
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const slug = getSlug(req, "auth");
+  const slug = getSlug(req);
   const route = slug[0];
 
   if (slug.length === 1 && route === "status") {
