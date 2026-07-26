@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { supabaseAdmin } from "./supabaseAdmin";
+import { supabaseAdmin } from "./supabaseAdmin.js";
 
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB

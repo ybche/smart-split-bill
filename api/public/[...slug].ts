@@ -1,11 +1,11 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { supabaseAdmin } from "../../lib/supabaseAdmin";
-import { toCamelCase } from "../../lib/caseConvert";
-import { getPortalData } from "../../lib/portal";
-import { logActivity } from "../../lib/activity";
-import { uploadBase64Image, UploadValidationError, withSignedProofUrl } from "../../lib/storage";
-import { isRateLimited } from "../../lib/rateLimit";
-import { normalizeIndonesianPhone } from "../../lib/phone";
+import { supabaseAdmin } from "../../lib/supabaseAdmin.js";
+import { toCamelCase } from "../../lib/caseConvert.js";
+import { getPortalData } from "../../lib/portal.js";
+import { logActivity } from "../../lib/activity.js";
+import { uploadBase64Image, UploadValidationError, withSignedProofUrl } from "../../lib/storage.js";
+import { isRateLimited } from "../../lib/rateLimit.js";
+import { normalizeIndonesianPhone } from "../../lib/phone.js";
 
 const TYPE_LABELS: Record<string, string> = { bank: "Bank Account", wallet: "E-Wallet", qris: "QRIS" };
 

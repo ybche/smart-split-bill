@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { supabaseAdmin } from "../lib/supabaseAdmin";
-import { requireAdmin } from "../lib/auth";
-import { toCamelCase } from "../lib/caseConvert";
+import { supabaseAdmin } from "../lib/supabaseAdmin.js";
+import { requireAdmin } from "../lib/auth.js";
+import { toCamelCase } from "../lib/caseConvert.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);

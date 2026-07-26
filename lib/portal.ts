@@ -1,6 +1,6 @@
-import { supabaseAdmin } from "./supabaseAdmin";
-import { toCamelCase } from "./caseConvert";
-import { withSignedProofUrl } from "./storage";
+import { supabaseAdmin } from "./supabaseAdmin.js";
+import { toCamelCase } from "./caseConvert.js";
+import { withSignedProofUrl } from "./storage.js";
 
 // Ported from the original getPayPortalHandler in server.ts.
 // Aggregates obligations across ALL of a participant's active category links

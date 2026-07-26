@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { supabaseAdmin } from "../../lib/supabaseAdmin";
-import { requireAdmin } from "../../lib/auth";
-import { logActivity } from "../../lib/activity";
-import { toCamelCase } from "../../lib/caseConvert";
-import { uploadBase64Image, UploadValidationError } from "../../lib/storage";
+import { supabaseAdmin } from "../../lib/supabaseAdmin.js";
+import { requireAdmin } from "../../lib/auth.js";
+import { logActivity } from "../../lib/activity.js";
+import { toCamelCase } from "../../lib/caseConvert.js";
+import { uploadBase64Image, UploadValidationError } from "../../lib/storage.js";
 
 function withAliases(row: any) {
   const camel = toCamelCase(row);

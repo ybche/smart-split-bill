@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { supabaseAdmin } from "./supabaseAdmin";
+import { supabaseAdmin } from "./supabaseAdmin.js";
 
 // Reuses an existing personal_token for this participant (from any category)
 // so each participant only ever has one token, matching the original

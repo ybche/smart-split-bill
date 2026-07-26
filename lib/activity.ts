@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "./supabaseAdmin";
+import { supabaseAdmin } from "./supabaseAdmin.js";
 
 export type EntityType = "category" | "transaction" | "participant" | "payment" | "token" | "method" | "admin" | "database";
 export type ActorType = "admin" | "participant";

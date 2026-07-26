@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { supabaseAdmin } from "../../lib/supabaseAdmin";
-import { requireAdmin } from "../../lib/auth";
-import { logActivity } from "../../lib/activity";
-import { toCamelCase } from "../../lib/caseConvert";
-import { normalizeIndonesianPhone } from "../../lib/phone";
+import { supabaseAdmin } from "../../lib/supabaseAdmin.js";
+import { requireAdmin } from "../../lib/auth.js";
+import { logActivity } from "../../lib/activity.js";
+import { toCamelCase } from "../../lib/caseConvert.js";
+import { normalizeIndonesianPhone } from "../../lib/phone.js";
 
 // Consolidates every /api/participants/* route into a single serverless
 // function (Vercel Hobby caps a deployment at 12 functions) via an optional

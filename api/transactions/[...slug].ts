@@ -1,10 +1,10 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { supabaseAdmin } from "../../lib/supabaseAdmin";
-import { requireAdmin } from "../../lib/auth";
-import { logActivity } from "../../lib/activity";
-import { toCamelCase } from "../../lib/caseConvert";
-import { calculateSplits } from "../../lib/splitEngine";
-import { syncCategoryParticipants } from "../../lib/categoryParticipantSync";
+import { supabaseAdmin } from "../../lib/supabaseAdmin.js";
+import { requireAdmin } from "../../lib/auth.js";
+import { logActivity } from "../../lib/activity.js";
+import { toCamelCase } from "../../lib/caseConvert.js";
+import { calculateSplits } from "../../lib/splitEngine.js";
+import { syncCategoryParticipants } from "../../lib/categoryParticipantSync.js";
 
 // Consolidates every /api/transactions/* route into a single serverless
 // function (Vercel Hobby caps a deployment at 12 functions) via an optional

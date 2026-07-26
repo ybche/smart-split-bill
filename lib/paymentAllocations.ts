@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "./supabaseAdmin";
+import { supabaseAdmin } from "./supabaseAdmin.js";
 
 // Reproportions a payment submission's total submitted_amount across the
 // transactions it covers, weighted by how much of that participant's

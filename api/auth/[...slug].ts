@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { supabaseAdmin } from "../../lib/supabaseAdmin";
-import { requireAdmin, mapAdminRow } from "../../lib/auth";
-import { logActivity } from "../../lib/activity";
+import { supabaseAdmin } from "../../lib/supabaseAdmin.js";
+import { requireAdmin, mapAdminRow } from "../../lib/auth.js";
+import { logActivity } from "../../lib/activity.js";
 
 // Consolidates every /api/auth/* route into a single serverless function
 // (Vercel Hobby caps a deployment at 12 functions) via an optional catch-all
