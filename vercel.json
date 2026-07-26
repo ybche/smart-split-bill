@@ -2,6 +2,12 @@
   "buildCommand": "vite build",
   "outputDirectory": "dist",
   "rewrites": [
+    { "source": "/api/categories", "destination": "/api/categories/_index" },
+    { "source": "/api/transactions", "destination": "/api/transactions/_index" },
+    { "source": "/api/participants", "destination": "/api/participants/_index" },
+    { "source": "/api/payments", "destination": "/api/payments/_index" },
+    { "source": "/api/payment-methods", "destination": "/api/payment-methods/_index" },
+    { "source": "/api/admins", "destination": "/api/admins/_index" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

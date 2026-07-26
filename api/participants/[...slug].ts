@@ -17,7 +17,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const slug = ([] as string[]).concat((req.query.slug as string | string[] | undefined) || []);
 
-  if (slug.length === 0) {
+  // Vercel's file-system router does not match the bare "/api/participants"
+  // path against a catch-all segment file, so vercel.json rewrites it to
+  // "/api/participants/_index" instead — treat that the same as no segments.
+  if (slug.length === 0 || (slug.length === 1 && slug[0] === "_index")) {
     if (req.method === "GET") {
       const { data, error } = await supabaseAdmin.from("participants").select("*").order("created_at", { ascending: false });
       if (error) return res.status(500).json({ error: error.message });

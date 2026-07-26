@@ -100,6 +100,12 @@ function readJsonBody(req) {
   });
 }
 
+// Mirrors vercel.json's rewrites: Vercel's file-system router does not match
+// a bare "/api/<group>" path against that group's catch-all segment file, so
+// production rewrites it to "/api/<group>/_index" first. Replicated here so
+// local dev hits the same code path as production.
+const BARE_ROUTE_GROUPS = ["categories", "transactions", "participants", "payments", "payment-methods", "admins"];
+
 /** @returns {import('vite').Plugin} */
 export default function devApiPlugin() {
   return {
@@ -110,7 +116,10 @@ export default function devApiPlugin() {
         if (!req.url || !req.url.startsWith("/api/")) return next();
 
         const urlObj = new URL(req.url, "http://localhost");
-        const segments = urlObj.pathname.replace(/^\/api\//, "").split("/").filter(Boolean);
+        let segments = urlObj.pathname.replace(/^\/api\//, "").split("/").filter(Boolean);
+        if (segments.length === 1 && BARE_ROUTE_GROUPS.includes(segments[0])) {
+          segments = [...segments, "_index"];
+        }
 
         const resolved = resolveApiFile(API_DIR, segments, {});
         if (!resolved) {
