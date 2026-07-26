@@ -3,6 +3,7 @@ import { supabaseAdmin } from "../../lib/supabaseAdmin.js";
 import { requireAdmin } from "../../lib/auth.js";
 import { logActivity } from "../../lib/activity.js";
 import { toCamelCase, toSnakeCase } from "../../lib/caseConvert.js";
+import { getSlug } from "../../lib/routeSlug.js";
 
 // Consolidates /api/db/export and /api/db/import into a single serverless
 // function (Vercel Hobby caps a deployment at 12 functions) via an optional
@@ -65,7 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
 
-  const slug = ([] as string[]).concat((req.query.slug as string | string[] | undefined) || []);
+  const slug = getSlug(req, "db");
 
   if (slug.length === 1 && slug[0] === "export") {
     if (req.method !== "GET") return res.status(405).json({ error: "Metode tidak diizinkan" });

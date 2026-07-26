@@ -4,6 +4,7 @@ import { requireAdmin } from "../../lib/auth.js";
 import { logActivity } from "../../lib/activity.js";
 import { toCamelCase } from "../../lib/caseConvert.js";
 import { uploadBase64Image, UploadValidationError } from "../../lib/storage.js";
+import { getSlug } from "../../lib/routeSlug.js";
 
 function withAliases(row: any) {
   const camel = toCamelCase(row);
@@ -21,7 +22,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
 
-  const slug = ([] as string[]).concat((req.query.slug as string | string[] | undefined) || []);
+  const slug = getSlug(req, "payment-methods");
 
   // Vercel's file-system router does not match the bare "/api/payment-methods"
   // path against a catch-all segment file, so vercel.json rewrites it to

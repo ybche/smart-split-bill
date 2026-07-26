@@ -3,6 +3,7 @@ import { supabaseAdmin } from "../../lib/supabaseAdmin.js";
 import { requireAdmin } from "../../lib/auth.js";
 import { logActivity } from "../../lib/activity.js";
 import { toCamelCase } from "../../lib/caseConvert.js";
+import { getSlug } from "../../lib/routeSlug.js";
 
 // Consolidates every /api/admins/* route into a single serverless function
 // (Vercel Hobby caps a deployment at 12 functions) via an optional catch-all
@@ -13,7 +14,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
 
-  const slug = ([] as string[]).concat((req.query.slug as string | string[] | undefined) || []);
+  const slug = getSlug(req, "admins");
 
   // Vercel's file-system router does not match the bare "/api/admins"
   // path against a catch-all segment file, so vercel.json rewrites it to

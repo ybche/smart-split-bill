@@ -5,6 +5,7 @@ import { logActivity } from "../../lib/activity.js";
 import { toCamelCase } from "../../lib/caseConvert.js";
 import { withSignedProofUrl, deleteProofImage, getSignedProofUrl } from "../../lib/storage.js";
 import { recalculatePaymentAllocations } from "../../lib/paymentAllocations.js";
+import { getSlug } from "../../lib/routeSlug.js";
 
 // Consolidates every /api/payments/* route into a single serverless function
 // (Vercel Hobby caps a deployment at 12 functions) via an optional catch-all
@@ -17,7 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
 
-  const slug = ([] as string[]).concat((req.query.slug as string | string[] | undefined) || []);
+  const slug = getSlug(req, "payments");
 
   // Vercel's file-system router does not match the bare "/api/payments"
   // path against a catch-all segment file, so vercel.json rewrites it to

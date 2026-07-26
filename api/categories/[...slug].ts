@@ -6,6 +6,7 @@ import { logActivity } from "../../lib/activity.js";
 import { toCamelCase } from "../../lib/caseConvert.js";
 import { normalizeIndonesianPhone } from "../../lib/phone.js";
 import { getOrCreateParticipantToken } from "../../lib/categoryParticipantSync.js";
+import { getSlug } from "../../lib/routeSlug.js";
 
 // Consolidates every /api/categories/* route into a single serverless
 // function (Vercel Hobby caps a deployment at 12 functions) via an optional
@@ -19,7 +20,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
 
-  const slug = ([] as string[]).concat((req.query.slug as string | string[] | undefined) || []);
+  const slug = getSlug(req, "categories");
 
   // Vercel's file-system router does not match the bare "/api/categories"
   // path against a catch-all segment file, so vercel.json rewrites it to

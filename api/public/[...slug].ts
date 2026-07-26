@@ -6,6 +6,7 @@ import { logActivity } from "../../lib/activity.js";
 import { uploadBase64Image, UploadValidationError, withSignedProofUrl } from "../../lib/storage.js";
 import { isRateLimited } from "../../lib/rateLimit.js";
 import { normalizeIndonesianPhone } from "../../lib/phone.js";
+import { getSlug } from "../../lib/routeSlug.js";
 
 const TYPE_LABELS: Record<string, string> = { bank: "Bank Account", wallet: "E-Wallet", qris: "QRIS" };
 
@@ -19,7 +20,7 @@ const TYPE_LABELS: Record<string, string> = { bank: "Bank Account", wallet: "E-W
 //   ["pay-portal" | "pay", token]        -> GET
 //   ["pay-portal" | "pay", token, "declare"] -> POST
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const slug = ([] as string[]).concat((req.query.slug as string | string[] | undefined) || []);
+  const slug = getSlug(req, "public");
   const route = slug[0];
 
   if (slug.length === 1 && route === "payment-methods") {
