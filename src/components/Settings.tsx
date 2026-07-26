@@ -12,66 +12,8 @@ interface SettingsProps {
 }
 
 export default function Settings({ token, admin, onShowNotification }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<"templates" | "admins" | "backup" | "supabase">("templates");
-  
-  // Supabase state
-  const [supabaseInfo, setSupabaseInfo] = useState<any>(null);
-  const [checkingSupabase, setCheckingSupabase] = useState(false);
-  const [restoringSupabase, setRestoringSupabase] = useState(false);
-  const [syncingSupabase, setSyncingSupabase] = useState(false);
+  const [activeTab, setActiveTab] = useState<"templates" | "admins" | "backup">("templates");
 
-  const checkSupabase = async () => {
-    setCheckingSupabase(true);
-    try {
-      const res = await fetch("/api/supabase/status");
-      const data = await res.json();
-      setSupabaseInfo(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setCheckingSupabase(false);
-    }
-  };
-
-  const handleRestoreSupabase = async () => {
-    setRestoringSupabase(true);
-    try {
-      const res = await fetch("/api/supabase/restore", { method: "POST" });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        onShowNotification(data.message || "Data berhasil direstore dari Supabase!", "success");
-        setTimeout(() => window.location.reload(), 1000);
-      } else {
-        onShowNotification(data.error || "Gagal merestore data dari Supabase.", "error");
-      }
-    } catch (err: any) {
-      onShowNotification("Terjadi kesalahan saat merestore data.", "error");
-    } finally {
-      setRestoringSupabase(false);
-    }
-  };
-
-  const handleSyncSupabase = async () => {
-    setSyncingSupabase(true);
-    try {
-      const res = await fetch("/api/supabase/sync", { method: "POST" });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        onShowNotification(data.message || "Data berhasil disinkronkan ke Supabase!", "success");
-      } else {
-        onShowNotification(data.error || "Gagal menyinkronkan data.", "error");
-      }
-    } catch (err: any) {
-      onShowNotification("Terjadi kesalahan saat menyinkronkan data.", "error");
-    } finally {
-      setSyncingSupabase(false);
-    }
-  };
-
-  useEffect(() => {
-    checkSupabase();
-  }, []);
-  
   // Backup / restore state
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -317,15 +259,6 @@ export default function Settings({ token, admin, onShowNotification }: SettingsP
           >
             <Database className="w-3.5 h-3.5" />
             Backup & Restore
-          </button>
-          <button
-            onClick={() => setActiveTab("supabase")}
-            className={`flex items-center gap-2 px-4 py-2 text-[10px] font-mono uppercase tracking-wider font-bold transition-colors cursor-pointer ${
-              activeTab === "supabase" ? "bg-white text-black" : "text-[#F9F9F7]/50 hover:text-white"
-            }`}
-          >
-            <Shield className="w-3.5 h-3.5 text-emerald-400" />
-            Supabase Integration
           </button>
         </div>
       </div>
@@ -737,105 +670,6 @@ export default function Settings({ token, admin, onShowNotification }: SettingsP
         </div>
       )}
 
-      {/* Tab Contents: Supabase Integration */}
-      {activeTab === "supabase" && (
-        <div className="space-y-6 max-w-4xl text-left">
-          <div className="bg-[#121214]/40 border border-white/5 p-6 space-y-6">
-            <div className="flex items-center justify-between border-b border-white/5 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold font-mono">
-                  ⚡
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white font-mono uppercase tracking-wider">
-                    Supabase Database Connection
-                  </h3>
-                  <p className="text-[11px] text-[#F9F9F7]/50 mt-0.5">
-                    PostgreSQL REST Client & Auth Integration
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={checkSupabase}
-                disabled={checkingSupabase}
-                className="flex items-center gap-2 border border-white/10 hover:border-emerald-500/40 bg-white/5 text-white font-mono text-[10px] uppercase font-bold py-2 px-3.5 transition-colors cursor-pointer"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${checkingSupabase ? "animate-spin text-emerald-400" : ""}`} />
-                {checkingSupabase ? "Checking..." : "Test Connection"}
-              </button>
-            </div>
-
-            {/* Connection Info */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-white/[0.02] border border-white/5 p-4 space-y-1">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#F9F9F7]/40 block">Project Reference ID</span>
-                <code className="text-xs font-mono text-emerald-400 font-bold block">jgzmefskwvnrnwkeonsh</code>
-              </div>
-
-              <div className="bg-white/[0.02] border border-white/5 p-4 space-y-1">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#F9F9F7]/40 block">Connection Status</span>
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                  <span className="text-xs font-mono text-emerald-400 font-bold">Active & Configured</span>
-                </div>
-              </div>
-
-              <div className="bg-white/[0.02] border border-white/5 p-4 space-y-1 md:col-span-2">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#F9F9F7]/40 block">Supabase Base Endpoint</span>
-                <code className="text-xs font-mono text-blue-400 font-semibold block break-all">https://jgzmefskwvnrnwkeonsh.supabase.co</code>
-              </div>
-            </div>
-
-            {/* Response check box */}
-            {supabaseInfo && (
-              <div className="bg-[#0A0A0C] border border-white/10 p-4 space-y-2">
-                <div className="flex items-center justify-between text-[10px] font-mono text-[#F9F9F7]/50 uppercase tracking-widest border-b border-white/5 pb-2">
-                  <span>Connection Diagnostics</span>
-                  <span className="text-emerald-400 font-bold">{supabaseInfo.status || "OK"}</span>
-                </div>
-                <p className="text-xs text-white/70 font-mono">
-                  {supabaseInfo.details || supabaseInfo.message || "Connected to Supabase client SDK"}
-                </p>
-              </div>
-            )}
-
-            {/* Action Buttons */}
-            <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-white/10">
-              <button
-                type="button"
-                onClick={handleRestoreSupabase}
-                disabled={restoringSupabase}
-                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-[11px] font-bold uppercase tracking-wider py-2.5 px-4 transition-colors cursor-pointer rounded disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${restoringSupabase ? "animate-spin" : ""}`} />
-                {restoringSupabase ? "Restoring..." : "⚡ Restore Data dari Supabase"}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSyncSupabase}
-                disabled={syncingSupabase}
-                className="flex items-center gap-2 border border-blue-500/30 hover:bg-blue-500/10 text-blue-300 font-mono text-[11px] font-bold uppercase tracking-wider py-2.5 px-4 transition-colors cursor-pointer rounded disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${syncingSupabase ? "animate-spin" : ""}`} />
-                {syncingSupabase ? "Syncing..." : "Sync Local ke Supabase"}
-              </button>
-            </div>
-
-            <div className="bg-emerald-500/5 border border-emerald-500/20 p-4 rounded-none text-xs text-[#F9F9F7]/70 space-y-2">
-              <p className="font-semibold text-emerald-300 font-mono text-[11px] uppercase tracking-wider flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                INTEGRATION SUCCESSFUL
-              </p>
-              <p className="text-[11px] text-[#F9F9F7]/60 leading-relaxed">
-                The Supabase client is initialized both client-side (<code className="text-emerald-300 font-mono">src/lib/supabase.ts</code>) and server-side (<code className="text-emerald-300 font-mono">server/supabase.ts</code>). You can now perform queries, user authentication, or real-time sync with your Supabase PostgreSQL instance.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

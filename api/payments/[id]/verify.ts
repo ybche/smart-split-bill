@@ -3,7 +3,8 @@ import { supabaseAdmin } from "../../../lib/supabaseAdmin";
 import { requireAdmin } from "../../../lib/auth";
 import { logActivity } from "../../../lib/activity";
 import { toCamelCase } from "../../../lib/caseConvert";
-import { withSignedProofUrl } from "../../../lib/storage";
+import { withSignedProofUrl, deleteProofImage } from "../../../lib/storage";
+import { recalculatePaymentAllocations } from "../../../lib/paymentAllocations";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
@@ -22,48 +23,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!sub) return res.status(404).json({ error: "Data pengajuan pembayaran tidak ditemukan." });
 
   if (action === "approve") {
+    // Once approved, the transfer proof image no longer needs to be kept
+    // around — reclaim the storage space and clear the reference.
+    if (sub.proof_url) await deleteProofImage(sub.proof_url);
+
     const { data: updated, error: updateError } = await supabaseAdmin
       .from("payment_submissions")
-      .update({ status: "Paid", verification_date: new Date().toISOString() })
+      .update({
+        status: "Paid",
+        verification_date: new Date().toISOString(),
+        ...(sub.proof_url ? { proof_url: null } : {}),
+      })
       .eq("id", id)
       .select()
       .single();
     if (updateError) return res.status(500).json({ error: updateError.message });
 
-    await supabaseAdmin.from("payment_allocations").delete().eq("payment_submission_id", id);
-
-    const obligationIds: string[] = sub.selected_obligations || [];
-    if (obligationIds.length > 0) {
-      const { data: allocations } = await supabaseAdmin
-        .from("allocations")
-        .select("transaction_id, rounded_amount")
-        .eq("participant_id", sub.participant_id)
-        .in("transaction_id", obligationIds);
-
-      const obligationByTx = new Map<string, number>();
-      (allocations ?? []).forEach((a: any) => {
-        obligationByTx.set(a.transaction_id, (obligationByTx.get(a.transaction_id) || 0) + a.rounded_amount);
-      });
-
-      const totalObligationToCover = obligationIds.reduce((sum, txId) => sum + (obligationByTx.get(txId) || 0), 0);
-
-      if (totalObligationToCover > 0) {
-        let runningAllocated = 0;
-        const rows = obligationIds.map((txId, idx) => {
-          const pObligation = obligationByTx.get(txId) || 0;
-          let allocatedShare: number;
-          if (idx === obligationIds.length - 1) {
-            allocatedShare = sub.submitted_amount - runningAllocated;
-          } else {
-            allocatedShare = Math.round((sub.submitted_amount * pObligation) / totalObligationToCover);
-            runningAllocated += allocatedShare;
-          }
-          return { payment_submission_id: id, transaction_id: txId, amount: allocatedShare };
-        });
-        const { error: allocError } = await supabaseAdmin.from("payment_allocations").insert(rows);
-        if (allocError) return res.status(500).json({ error: allocError.message });
-      }
-    }
+    await recalculatePaymentAllocations(id, sub.participant_id, sub.selected_obligations || [], sub.submitted_amount);
 
     await logActivity(admin.id, "payment", id, "approved", "admin", { amount: sub.submitted_amount });
     return res.json(toCamelCase(await withSignedProofUrl(updated)));
@@ -71,6 +47,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (action === "reject") {
     const reason = rejectionReason || "Incomplete proof of payment or invalid transfer amount.";
+
+    // Reverses the ledger effect if this submission had previously been
+    // approved (admin can re-open and reject an already-Paid submission),
+    // so the participant's obligation becomes outstanding again.
+    await supabaseAdmin.from("payment_allocations").delete().eq("payment_submission_id", id);
+
     const { data: updated, error: updateError } = await supabaseAdmin
       .from("payment_submissions")
       .update({ status: "Rejected", rejection_reason: reason, verification_date: new Date().toISOString() })

@@ -94,7 +94,12 @@ create table category_participants (
   id uuid primary key default gen_random_uuid(),
   category_id uuid not null references categories(id) on delete cascade,
   participant_id uuid not null references participants(id) on delete cascade,
-  personal_token text not null unique,
+  -- personal_token is intentionally NOT unique: one token belongs to one
+  -- participant, but is duplicated across every category_participants row for
+  -- that participant (see lib/categoryParticipantSync.ts) so a single link
+  -- can aggregate obligations across all their categories ("unified billing
+  -- delegate"). Do not add a unique constraint here.
+  personal_token text not null,
   token_state text not null default 'Active' check (token_state in ('Active', 'Revoked', 'Expired')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),

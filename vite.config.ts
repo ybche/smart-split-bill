@@ -10,7 +10,7 @@ export default defineConfig(({mode}) => {
   // .env.local so the dev API plugin can reach Supabase locally.
   const env = loadEnv(mode, process.cwd(), '');
   for (const [key, value] of Object.entries(env)) {
-    if (process.env[key] === undefined) process.env[key] = value;
+    process.env[key] = value;
   }
 
   return {

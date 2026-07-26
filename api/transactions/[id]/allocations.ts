@@ -17,5 +17,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (itemsError) return res.status(500).json({ error: itemsError.message });
   if (allocError) return res.status(500).json({ error: allocError.message });
 
-  res.json({ items: toCamelCase(items), allocations: toCamelCase(allocations) });
+  // The edit form (Transactions.tsx) reconstructs each item's checked
+  // participants from item.allocations, so allocations must be nested per
+  // item, not returned as a separate flat array.
+  const itemsWithAllocations = (items ?? []).map((item: any) => ({
+    ...toCamelCase(item),
+    allocations: toCamelCase((allocations ?? []).filter((al: any) => al.item_id === item.id)),
+  }));
+
+  const chargeAllocations = toCamelCase((allocations ?? []).filter((al: any) => !al.item_id));
+
+  res.json({ items: itemsWithAllocations, allocations: chargeAllocations });
 }

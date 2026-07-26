@@ -68,6 +68,14 @@ export async function getSignedProofUrl(path: string, expiresInSeconds = 3600): 
   return data.signedUrl;
 }
 
+// Once a payment is approved there is no further need to keep the transfer
+// proof image around — call this to reclaim storage space. Safe to call even
+// if the path is already gone.
+export async function deleteProofImage(path: string): Promise<void> {
+  const { error } = await supabaseAdmin.storage.from("payment-proofs").remove([path]);
+  if (error) console.error("deleteProofImage failed:", error.message);
+}
+
 // payment_submissions.proof_url stores a bare storage path (private bucket).
 // Call this before sending any row containing proof_url/proofUrl to a client
 // so it becomes a usable (time-limited) URL instead of an opaque path.

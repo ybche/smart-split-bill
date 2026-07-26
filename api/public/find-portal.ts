@@ -27,14 +27,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const q = query.trim().toLowerCase();
 
-  const { data: cpDirect } = await supabaseAdmin
+  const { data: cpDirectRows } = await supabaseAdmin
     .from("category_participants")
     .select("personal_token")
     .eq("personal_token", q)
     .eq("token_state", "Active")
-    .maybeSingle();
-  if (cpDirect) {
-    return res.json({ token: cpDirect.personal_token });
+    .limit(1);
+  if (cpDirectRows && cpDirectRows.length > 0) {
+    return res.json({ token: cpDirectRows[0].personal_token });
   }
 
   const normalizedPhone = normalizeIndonesianPhone(query.trim());

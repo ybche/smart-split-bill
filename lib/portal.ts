@@ -6,12 +6,17 @@ import { withSignedProofUrl } from "./storage";
 // Aggregates obligations across ALL of a participant's active category links
 // (the "unified billing delegate" behavior), not just the token's own category.
 export async function getPortalData(token: string) {
-  const { data: cp, error: cpError } = await supabaseAdmin
+  // personal_token is intentionally shared across all of a participant's
+  // category_participants rows (one token per participant, not per row), so
+  // more than one row can match here — any one of them identifies the
+  // participant, since the aggregation below looks up by participant_id anyway.
+  const { data: cpRows, error: cpError } = await supabaseAdmin
     .from("category_participants")
     .select("*")
     .eq("personal_token", token)
-    .maybeSingle();
+    .limit(1);
   if (cpError) throw new Error(cpError.message);
+  const cp = cpRows?.[0];
   if (!cp || cp.token_state !== "Active") {
     return { error: "Tautan aman ini tidak valid, sudah kedaluwarsa, atau telah dicabut.", status: 403 } as const;
   }

@@ -1,20 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { randomBytes } from "crypto";
 import { supabaseAdmin } from "../../../lib/supabaseAdmin";
 import { requireAdmin } from "../../../lib/auth";
 import { logActivity } from "../../../lib/activity";
 import { normalizeIndonesianPhone } from "../../../lib/phone";
-
-async function getOrCreateParticipantToken(participantId: string): Promise<string> {
-  const { data } = await supabaseAdmin
-    .from("category_participants")
-    .select("personal_token")
-    .eq("participant_id", participantId)
-    .not("personal_token", "is", null)
-    .limit(1)
-    .maybeSingle();
-  return data?.personal_token || randomBytes(16).toString("hex");
-}
+import { getOrCreateParticipantToken } from "../../../lib/categoryParticipantSync";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);

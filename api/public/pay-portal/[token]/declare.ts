@@ -21,12 +21,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     mimeType,
   } = req.body ?? {};
 
-  const { data: cp, error: cpError } = await supabaseAdmin
+  // personal_token is shared across all of a participant's category_participants
+  // rows (one token per participant, not per row), so more than one row can match.
+  const { data: cpRows, error: cpError } = await supabaseAdmin
     .from("category_participants")
     .select("*")
     .eq("personal_token", token)
-    .maybeSingle();
+    .limit(1);
   if (cpError) return res.status(500).json({ error: cpError.message });
+  const cp = cpRows?.[0];
   if (!cp || cp.token_state !== "Active") {
     return res.status(403).json({ error: "Token tidak valid atau tautan tidak aktif." });
   }

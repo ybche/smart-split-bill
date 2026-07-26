@@ -68,21 +68,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (paidSub) {
           status = "Paid";
           submissionId = paidSub.id;
-          submittedAmount = totalExpected;
+          submittedAmount = paidSub.submitted_amount;
           proofUrl = paidSub.proof_url;
           methodSnapshot = paidSub.method_snapshot;
           submissionDate = paidSub.submission_date;
         } else if (pendingSub) {
           status = "Pending Approval";
           submissionId = pendingSub.id;
-          submittedAmount = totalExpected;
+          submittedAmount = pendingSub.submitted_amount;
           proofUrl = pendingSub.proof_url;
           methodSnapshot = pendingSub.method_snapshot;
           submissionDate = pendingSub.submission_date;
         } else if (rejectedSub) {
           status = "Rejected";
           submissionId = rejectedSub.id;
-          submittedAmount = totalExpected;
+          submittedAmount = rejectedSub.submitted_amount;
           proofUrl = rejectedSub.proof_url;
           methodSnapshot = rejectedSub.method_snapshot;
           submissionDate = rejectedSub.submission_date;

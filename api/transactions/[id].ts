@@ -4,6 +4,7 @@ import { requireAdmin } from "../../lib/auth";
 import { logActivity } from "../../lib/activity";
 import { toCamelCase } from "../../lib/caseConvert";
 import { calculateSplits } from "../../lib/splitEngine";
+import { syncCategoryParticipants } from "../../lib/categoryParticipantSync";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
@@ -119,6 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (error) return res.status(500).json({ error: error.message });
       }
 
+      await syncCategoryParticipants(existing.category_id);
       await logActivity(admin.id, "transaction", id, "updated", "admin", { title: updated.title, total: updated.total });
       return res.json(toCamelCase(updated));
     } catch (err: any) {
@@ -132,7 +134,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: existing, error: fetchError } = await supabaseAdmin
       .from("transactions")
-      .select("id")
+      .select("id, category_id")
       .eq("id", id)
       .maybeSingle();
     if (fetchError) return res.status(500).json({ error: fetchError.message });
@@ -167,6 +169,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { error: deleteError } = await supabaseAdmin.from("transactions").delete().eq("id", id);
     if (deleteError) return res.status(500).json({ error: deleteError.message });
 
+    await syncCategoryParticipants(existing.category_id);
     await logActivity(admin.id, "transaction", id, "deleted", "admin");
     return res.json({ success: true });
   }

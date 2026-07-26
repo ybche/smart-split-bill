@@ -4,6 +4,7 @@ import { requireAdmin } from "../../lib/auth";
 import { logActivity } from "../../lib/activity";
 import { toCamelCase } from "../../lib/caseConvert";
 import { calculateSplits } from "../../lib/splitEngine";
+import { syncCategoryParticipants } from "../../lib/categoryParticipantSync";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
@@ -123,6 +124,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (error) return res.status(500).json({ error: error.message });
       }
 
+      await syncCategoryParticipants(categoryId);
       await logActivity(admin.id, "transaction", transactionId, "created", "admin", { title, total: numTotal });
       return res.status(201).json(toCamelCase(newTransaction));
     } catch (err: any) {

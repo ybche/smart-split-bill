@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { 
-  Check, X, Eye, EyeOff, RefreshCw, Info, Calendar, DollarSign, 
+import {
+  Check, X, Eye, EyeOff, RefreshCw, Info, Calendar, DollarSign,
   User, CheckCircle, AlertTriangle, MessageSquare, Clipboard, ExternalLink, ShieldAlert,
-  Trash2, Search, ArrowUpDown, ChevronLeft, ChevronRight, Download
+  Trash2, Search, ArrowUpDown, ChevronLeft, ChevronRight, Download, Pencil
 } from "lucide-react";
 import { PaymentSubmission } from "../types";
 
@@ -32,6 +32,11 @@ export default function Payments({ token, onShowNotification }: PaymentsProps) {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [selectedSubId, setSelectedSubId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
+
+  // Edit Submission Modal state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editSubId, setEditSubId] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState("");
 
   // Method Snapshot modal states
   const [selectedSnapshot, setSelectedSnapshot] = useState<any | null>(null);
@@ -128,6 +133,46 @@ export default function Payments({ token, onShowNotification }: PaymentsProps) {
     setSelectedSubId(id);
     setRejectionReason("");
     setShowRejectModal(true);
+  };
+
+  const openEditModal = (h: any) => {
+    setEditSubId(h.submissionId);
+    setEditAmount(String(h.submittedAmount === "Not Paid" ? 0 : h.submittedAmount));
+    setShowEditModal(true);
+  };
+
+  const handleEditPayment = async () => {
+    if (!editSubId) return;
+    const amountNum = Number(editAmount);
+    if (editAmount === "" || isNaN(amountNum) || amountNum < 0) {
+      onShowNotification("Please enter a valid submitted amount.", "error");
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/payments/${editSubId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ submittedAmount: amountNum })
+      });
+
+      if (res.ok) {
+        onShowNotification("Payment submission updated successfully.", "success");
+        setShowEditModal(false);
+        setEditSubId(null);
+        fetchPayments();
+        fetchPersonalOverview();
+      } else {
+        const err = await res.json();
+        onShowNotification(err.error || "Gagal memperbarui pengajuan pembayaran.", "error");
+      }
+    } catch (err) {
+      console.error(err);
+      onShowNotification("Terjadi kesalahan jaringan saat memperbarui pembayaran.", "error");
+    }
   };
 
   const handleDeletePayment = async (id: string) => {
@@ -564,8 +609,8 @@ export default function Payments({ token, onShowNotification }: PaymentsProps) {
                   }
 
                   const totalAllocations = p.history.reduce((sum: number, h: any) => sum + h.expectedAmount, 0);
-                  const totalPaid = p.history.filter((h: any) => h.status === "Paid").reduce((sum: number, h: any) => sum + h.expectedAmount, 0);
-                  const totalPending = p.history.filter((h: any) => h.status === "Pending Approval").reduce((sum: number, h: any) => sum + h.expectedAmount, 0);
+                  const totalPaid = p.history.filter((h: any) => h.status === "Paid").reduce((sum: number, h: any) => sum + (Number(h.submittedAmount) || 0), 0);
+                  const totalPending = p.history.filter((h: any) => h.status === "Pending Approval").reduce((sum: number, h: any) => sum + (Number(h.submittedAmount) || 0), 0);
                   const totalUnpaid = p.history.filter((h: any) => h.status === "Not Paid" || h.status === "Rejected").reduce((sum: number, h: any) => sum + h.expectedAmount, 0);
 
                   return (
@@ -704,24 +749,42 @@ export default function Payments({ token, onShowNotification }: PaymentsProps) {
                                           </button>
                                         )}
                                         {h.status === "Pending Approval" && h.submissionId && (
-                                          <>
-                                            <button 
-                                              onClick={() => handleVerifyPayment(h.submissionId, "approve")}
-                                              className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 p-1 transition-all cursor-pointer"
-                                              title="Approve payment"
-                                            >
-                                              <Check className="w-3.5 h-3.5" />
-                                            </button>
-                                            <button 
-                                              onClick={() => openRejectModal(h.submissionId)}
-                                              className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 p-1 transition-all cursor-pointer"
-                                              title="Reject payment"
-                                            >
-                                              <X className="w-3.5 h-3.5" />
-                                            </button>
-                                          </>
+                                          <button
+                                            onClick={() => handleVerifyPayment(h.submissionId, "approve")}
+                                            className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 p-1 transition-all cursor-pointer"
+                                            title="Approve payment"
+                                          >
+                                            <Check className="w-3.5 h-3.5" />
+                                          </button>
                                         )}
-                                        {!h.proofUrl && h.status !== "Pending Approval" && (
+                                        {h.submissionId && h.status !== "Rejected" && (
+                                          <button
+                                            onClick={() => openRejectModal(h.submissionId)}
+                                            className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 p-1 transition-all cursor-pointer"
+                                            title={h.status === "Paid" ? "Reopen and reject this approved payment" : "Reject payment"}
+                                          >
+                                            <X className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                        {h.submissionId && (
+                                          <button
+                                            onClick={() => openEditModal(h)}
+                                            className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 p-1 transition-all cursor-pointer"
+                                            title="Edit submitted amount"
+                                          >
+                                            <Pencil className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                        {h.submissionId && (
+                                          <button
+                                            onClick={() => handleDeletePayment(h.submissionId)}
+                                            className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 p-1 transition-all cursor-pointer"
+                                            title="Delete payment record permanently"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                        {!h.proofUrl && !h.submissionId && (
                                           <span className="text-white/20 italic font-mono text-[10px]">—</span>
                                         )}
                                       </div>
@@ -815,6 +878,59 @@ export default function Payments({ token, onShowNotification }: PaymentsProps) {
                   className="px-4 py-2.5 bg-rose-500 hover:bg-rose-600 text-white font-bold cursor-pointer"
                 >
                   Reject Submission
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT SUBMITTED AMOUNT MODAL */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-[#0D0D0F]/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#121214] border border-white/10 w-full max-w-md overflow-hidden text-left shadow-2xl">
+            <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
+              <h3 className="editorial-title italic text-2xl text-white flex items-center gap-2">
+                <Pencil className="w-5 h-5 text-blue-400" />
+                Edit Submission_
+              </h3>
+              <button onClick={() => setShowEditModal(false)} className="text-[#F9F9F7]/50 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="p-4 bg-blue-950/20 border border-blue-900/30 text-xs text-blue-300 flex gap-3">
+                <Info className="w-4 h-4 shrink-0 mt-0.5 text-blue-400" />
+                <p className="leading-relaxed">Correcting the submitted amount on an already-approved payment will also recalculate its balance allocation across the covered transactions.</p>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono font-bold uppercase tracking-widest text-[#F9F9F7]/50 mb-2">Submitted Amount (IDR) *</label>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                  className="w-full bg-white/[0.03] border border-white/10 rounded-none p-3.5 text-sm focus:outline-none focus:border-blue-500 text-white font-mono placeholder:opacity-30"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-white/5 pt-5 mt-6 font-mono text-[10px] uppercase tracking-widest">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="px-4 py-2.5 border border-white/10 hover:bg-white/5 text-white/70 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEditPayment}
+                  className="px-4 py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-bold cursor-pointer"
+                >
+                  Save Changes
                 </button>
               </div>
             </div>
