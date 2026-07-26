@@ -9,20 +9,35 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API_DIR = path.join(__dirname, "api");
 
-function resolveApiFile(baseDir, segments, params) {
-  if (segments.length === 0) {
-    const indexFile = path.join(baseDir, "index.ts");
-    if (fs.existsSync(indexFile)) return { file: indexFile, params };
-    return null;
-  }
+// Dynamic segment names must not contain another bracket or a dot, so these
+// patterns don't accidentally also match catch-all filenames like
+// "[...slug].ts" or "[[...slug]].ts".
+const SINGLE_DYNAMIC_FILE_RE = /^\[([^.[\]]+)\]\.ts$/;
+const SINGLE_DYNAMIC_DIR_RE = /^\[([^.[\]]+)\]$/;
+const CATCH_ALL_FILE_RE = /^\[\.\.\.(.+)\]\.ts$/;
+const OPTIONAL_CATCH_ALL_FILE_RE = /^\[\[\.\.\.(.+)\]\]\.ts$/;
 
-  const [seg, ...rest] = segments;
+function resolveApiFile(baseDir, segments, params) {
   let entries;
   try {
     entries = fs.readdirSync(baseDir, { withFileTypes: true });
   } catch {
     return null;
   }
+
+  if (segments.length === 0) {
+    const indexFile = path.join(baseDir, "index.ts");
+    if (fs.existsSync(indexFile)) return { file: indexFile, params };
+
+    const optionalCatchAllFile = entries.find((e) => e.isFile() && OPTIONAL_CATCH_ALL_FILE_RE.test(e.name));
+    if (optionalCatchAllFile) {
+      const paramName = optionalCatchAllFile.name.match(OPTIONAL_CATCH_ALL_FILE_RE)[1];
+      return { file: path.join(baseDir, optionalCatchAllFile.name), params: { ...params, [paramName]: [] } };
+    }
+    return null;
+  }
+
+  const [seg, ...rest] = segments;
 
   if (rest.length === 0) {
     const exactFile = path.join(baseDir, `${seg}.ts`);
@@ -36,18 +51,32 @@ function resolveApiFile(baseDir, segments, params) {
   }
 
   if (rest.length === 0) {
-    const dynFile = entries.find((e) => e.isFile() && /^\[.+\]\.ts$/.test(e.name));
+    const dynFile = entries.find((e) => e.isFile() && SINGLE_DYNAMIC_FILE_RE.test(e.name));
     if (dynFile) {
-      const paramName = dynFile.name.match(/^\[(.+)\]\.ts$/)[1];
+      const paramName = dynFile.name.match(SINGLE_DYNAMIC_FILE_RE)[1];
       return { file: path.join(baseDir, dynFile.name), params: { ...params, [paramName]: seg } };
     }
   }
 
-  const dynDir = entries.find((e) => e.isDirectory() && /^\[.+\]$/.test(e.name));
+  const dynDir = entries.find((e) => e.isDirectory() && SINGLE_DYNAMIC_DIR_RE.test(e.name));
   if (dynDir) {
-    const paramName = dynDir.name.match(/^\[(.+)\]$/)[1];
+    const paramName = dynDir.name.match(SINGLE_DYNAMIC_DIR_RE)[1];
     const result = resolveApiFile(path.join(baseDir, dynDir.name), rest, { ...params, [paramName]: seg });
     if (result) return result;
+  }
+
+  // Catch-all (required): [...param].ts — consumes ALL remaining segments.
+  const catchAllFile = entries.find((e) => e.isFile() && CATCH_ALL_FILE_RE.test(e.name));
+  if (catchAllFile) {
+    const paramName = catchAllFile.name.match(CATCH_ALL_FILE_RE)[1];
+    return { file: path.join(baseDir, catchAllFile.name), params: { ...params, [paramName]: segments } };
+  }
+
+  // Optional catch-all: [[...param]].ts — also matches when segments remain.
+  const optionalCatchAllFile = entries.find((e) => e.isFile() && OPTIONAL_CATCH_ALL_FILE_RE.test(e.name));
+  if (optionalCatchAllFile) {
+    const paramName = optionalCatchAllFile.name.match(OPTIONAL_CATCH_ALL_FILE_RE)[1];
+    return { file: path.join(baseDir, optionalCatchAllFile.name), params: { ...params, [paramName]: segments } };
   }
 
   return null;
