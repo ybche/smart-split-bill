@@ -2,8 +2,9 @@ import React, { useState, useEffect } from "react";
 import { 
   TrendingUp, Users, DollarSign, ListCollapse, Play, CheckCircle, 
   Clock, AlertCircle, Plus, Receipt, Landmark, RefreshCw, ChevronRight, 
-  Activity as ActivityIcon, Award, PieChart, Info, CheckCircle2, LogOut, 
-  Settings, Key, Sparkles, User, HelpCircle, FileText, AlertTriangle, Menu, X
+  Activity as ActivityIcon, Award, PieChart, Info, CheckCircle2, LogOut,
+  Settings, Key, Sparkles, User, HelpCircle, FileText, AlertTriangle, Menu, X,
+  ClipboardList
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { supabase } from "./lib/supabase";
@@ -14,6 +15,7 @@ import Categories from "./components/Categories";
 import Transactions from "./components/Transactions";
 import Participants from "./components/Participants";
 import Payments from "./components/Payments";
+import Declarations from "./components/Declarations";
 import PaymentMethods from "./components/PaymentMethods";
 import Reports from "./components/Reports";
 import PayPortal from "./components/PayPortal";
@@ -48,6 +50,7 @@ export default function App() {
     { path: "/app/transactions", label: "Transactions", icon: Receipt },
     { path: "/app/participants", label: "Participants", icon: Users },
     { path: "/app/payments", label: "Payments", icon: DollarSign },
+    { path: "/app/declarations", label: "Declarations", icon: ClipboardList },
     { path: "/app/payment-methods", label: "Payment Methods", icon: Landmark },
     { path: "/app/reports", label: "Reports & Logs", icon: FileText },
     { path: "/app/settings", label: "Settings", icon: Settings },
@@ -500,6 +503,8 @@ export default function App() {
     activeComponent = <Participants token={adminToken} onShowNotification={showNotification} />;
   } else if (currentPath === "/app/payments") {
     activeComponent = <Payments token={adminToken} onShowNotification={showNotification} />;
+  } else if (currentPath === "/app/declarations") {
+    activeComponent = <Declarations token={adminToken} onShowNotification={showNotification} />;
   } else if (currentPath === "/app/payment-methods") {
     activeComponent = <PaymentMethods token={adminToken} onShowNotification={showNotification} />;
   } else if (currentPath === "/app/reports") {

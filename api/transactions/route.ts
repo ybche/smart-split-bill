@@ -5,14 +5,17 @@ import { logActivity } from "../../lib/activity.js";
 import { toCamelCase } from "../../lib/caseConvert.js";
 import { calculateSplits } from "../../lib/splitEngine.js";
 import { syncCategoryParticipants } from "../../lib/categoryParticipantSync.js";
+import { createAwaitingInputRows, approveFreeInput, rejectFreeInput } from "../../lib/freeInputAllocations.js";
 import { getSlug } from "../../lib/routeSlug.js";
 
 // Consolidates every /api/transactions/* route into a single serverless
 // function (Vercel Hobby caps a deployment at 12 functions) via an optional
 // catch-all segment:
-//   []                    -> GET / POST
-//   [id]                  -> PUT / DELETE
-//   [id, "allocations"]   -> GET
+//   []                          -> GET / POST
+//   ["declarations"]            -> GET (global pending free-input declarations)
+//   [id]                        -> PUT / DELETE
+//   [id, "allocations"]         -> GET
+//   [id, "free-input", allocId] -> POST (approve/reject a declaration)
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -32,6 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           categoryId, title, merchant, date, payerId,
           subtotal, tax, serviceCharge, discount, otherFees, total,
           expenseClassification, items, description, notes, status, inputMethod,
+          freeInputParticipantIds,
         } = req.body ?? {};
 
         if (!categoryId || !title || !payerId || subtotal === undefined || total === undefined) {
@@ -134,6 +138,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (error) return res.status(500).json({ error: error.message });
         }
 
+        if (Array.isArray(freeInputParticipantIds) && freeInputParticipantIds.length > 0) {
+          await createAwaitingInputRows(transactionId, freeInputParticipantIds);
+        }
+
         await syncCategoryParticipants(categoryId);
         await logActivity(admin.id, "transaction", transactionId, "created", "admin", { title, total: numTotal });
         return res.status(201).json(toCamelCase(newTransaction));
@@ -146,6 +154,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Metode tidak diizinkan" });
   }
 
+  if (slug.length === 1 && slug[0] === "declarations") {
+    if (req.method !== "GET") return res.status(405).json({ error: "Metode tidak diizinkan" });
+
+    const { data, error } = await supabaseAdmin
+      .from("allocations")
+      .select("id, transaction_id, rounded_amount, participants(full_name, nickname), transactions(title, date, categories(name))")
+      .eq("method", "FreeInput")
+      .eq("status", "Pending");
+    if (error) return res.status(500).json({ error: error.message });
+
+    const declarations = (data ?? []).map((row: any) => ({
+      id: row.id,
+      transactionId: row.transaction_id,
+      participantName: row.participants?.nickname || row.participants?.full_name || "Unknown",
+      transactionTitle: row.transactions?.title || "Unknown",
+      transactionDate: row.transactions?.date,
+      categoryName: row.transactions?.categories?.name || "Unknown",
+      declaredAmount: row.rounded_amount,
+    }));
+
+    return res.json(declarations);
+  }
+
   const id = slug[0];
 
   if (slug.length === 1) {
@@ -155,6 +186,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           title, merchant, date, payerId,
           subtotal, tax, serviceCharge, discount, otherFees, total,
           expenseClassification, items, description, notes, status,
+          freeInputParticipantIds,
         } = req.body ?? {};
 
         const { data: existing, error: fetchError } = await supabaseAdmin
@@ -195,8 +227,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .single();
         if (updateError) return res.status(500).json({ error: updateError.message });
 
-        // Full replace of items + allocations for this transaction.
-        await supabaseAdmin.from("allocations").delete().eq("transaction_id", id);
+        // Full replace of items + split-engine allocations for this
+        // transaction. FreeInput rows are excluded — a participant's
+        // declaration (awaiting, pending, approved, or rejected) must survive
+        // the admin editing unrelated parts of the transaction.
+        await supabaseAdmin.from("allocations").delete().eq("transaction_id", id).neq("method", "FreeInput");
         await supabaseAdmin.from("transaction_items").delete().eq("transaction_id", id);
 
         const safeItems = Array.isArray(items) ? items : [];
@@ -256,6 +291,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const { error } = await supabaseAdmin.from("allocations").insert(allocationRows);
           if (error) return res.status(500).json({ error: error.message });
         }
+
+        const freeInputIds = Array.isArray(freeInputParticipantIds) ? freeInputParticipantIds : [];
+        if (freeInputIds.length > 0) {
+          await createAwaitingInputRows(id, freeInputIds);
+        }
+        // A participant removed from the free-input list only has their row
+        // dropped if it's still untouched (AwaitingInput) — once they've
+        // declared something (Pending/Approved/Rejected) it must not vanish
+        // just because admin unchecked them here.
+        await supabaseAdmin
+          .from("allocations")
+          .delete()
+          .eq("transaction_id", id)
+          .eq("method", "FreeInput")
+          .eq("status", "AwaitingInput")
+          .not("participant_id", "in", `(${(freeInputIds.length ? freeInputIds : ["00000000-0000-0000-0000-000000000000"]).join(",")})`);
 
         await syncCategoryParticipants(existing.category_id);
         await logActivity(admin.id, "transaction", id, "updated", "admin", { title: updated.title, total: updated.total });
@@ -332,9 +383,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       allocations: toCamelCase((allocations ?? []).filter((al: any) => al.item_id === item.id)),
     }));
 
-    const chargeAllocations = toCamelCase((allocations ?? []).filter((al: any) => !al.item_id));
+    const chargeAllocations = toCamelCase((allocations ?? []).filter((al: any) => !al.item_id && al.method !== "FreeInput"));
+    const freeInputAllocations = toCamelCase((allocations ?? []).filter((al: any) => al.method === "FreeInput"));
 
-    return res.json({ items: itemsWithAllocations, allocations: chargeAllocations });
+    return res.json({ items: itemsWithAllocations, allocations: chargeAllocations, freeInputAllocations });
+  }
+
+  if (slug.length === 3 && slug[1] === "free-input") {
+    if (req.method !== "POST") return res.status(405).json({ error: "Metode tidak diizinkan" });
+
+    const allocationId = slug[2];
+    const { action, rejectionReason } = req.body ?? {};
+
+    try {
+      if (action === "approve") {
+        await approveFreeInput(allocationId);
+        await logActivity(admin.id, "transaction", id, "free_input_approved", "admin", { allocationId });
+        return res.json({ success: true });
+      }
+      if (action === "reject") {
+        const reason = rejectionReason || "Nominal tidak sesuai atau tidak dapat diverifikasi.";
+        await rejectFreeInput(allocationId, reason);
+        await logActivity(admin.id, "transaction", id, "free_input_rejected", "admin", { allocationId, reason });
+        return res.json({ success: true });
+      }
+      return res.status(400).json({ error: "Aksi tidak valid. Harus 'approve' atau 'reject'." });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || "Gagal memproses deklarasi." });
+    }
   }
 
   res.status(404).json({ error: "Rute tidak ditemukan." });

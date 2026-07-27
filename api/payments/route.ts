@@ -27,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       supabaseAdmin.from("payment_submissions").select("*").order("submission_date", { ascending: false }),
       supabaseAdmin.from("participants").select("id, full_name"),
       supabaseAdmin.from("categories").select("id, name"),
-      supabaseAdmin.from("allocations").select("transaction_id, participant_id, rounded_amount"),
+      supabaseAdmin.from("allocations").select("transaction_id, participant_id, rounded_amount").eq("status", "Approved"),
     ]);
     if (subError) return res.status(500).json({ error: subError.message });
 
@@ -60,7 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const [{ data: participants }, { data: allocations }, { data: transactions }, { data: categories }, { data: items }, { data: submissions }] =
       await Promise.all([
         supabaseAdmin.from("participants").select("*"),
-        supabaseAdmin.from("allocations").select("*"),
+        supabaseAdmin.from("allocations").select("*").eq("status", "Approved"),
         supabaseAdmin.from("transactions").select("*"),
         supabaseAdmin.from("categories").select("*"),
         supabaseAdmin.from("transaction_items").select("*"),

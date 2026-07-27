@@ -18,6 +18,7 @@ export async function recalculatePaymentAllocations(
     .from("allocations")
     .select("transaction_id, rounded_amount")
     .eq("participant_id", participantId)
+    .eq("status", "Approved")
     .in("transaction_id", obligationIds);
 
   const obligationByTx = new Map<string, number>();

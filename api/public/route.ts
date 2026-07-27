@@ -239,7 +239,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         categoryToObligations[t.category_id].push(t.id);
       });
 
-      const { data: myAllocations } = await supabaseAdmin.from("allocations").select("*").eq("participant_id", cp.participant_id).in("transaction_id", obligations);
+      const { data: myAllocations } = await supabaseAdmin
+        .from("allocations")
+        .select("*")
+        .eq("participant_id", cp.participant_id)
+        .eq("status", "Approved")
+        .in("transaction_id", obligations);
       const { data: mySubmissions } = await supabaseAdmin.from("payment_submissions").select("*").eq("participant_id", cp.participant_id);
       const { data: myPaymentAllocations } = await supabaseAdmin.from("payment_allocations").select("*");
 
@@ -309,6 +314,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       return res.status(201).json(toCamelCase(await withSignedProofUrl(createdSubmissions[0])));
+    }
+
+    if (slug.length === 3 && slug[2] === "free-input") {
+      if (req.method !== "POST") return res.status(405).json({ error: "Metode tidak diizinkan" });
+
+      const { transactionId, amount } = req.body ?? {};
+      if (!transactionId || amount === undefined || Number(amount) < 0) {
+        return res.status(400).json({ error: "Nominal deklarasi tidak valid." });
+      }
+
+      const { data: cpRows, error: cpError } = await supabaseAdmin
+        .from("category_participants")
+        .select("participant_id, token_state")
+        .eq("personal_token", token)
+        .limit(1);
+      if (cpError) return res.status(500).json({ error: cpError.message });
+      const cp = cpRows?.[0];
+      if (!cp || cp.token_state !== "Active") {
+        return res.status(403).json({ error: "Token tidak valid atau tautan tidak aktif." });
+      }
+
+      const { data: alloc, error: allocError } = await supabaseAdmin
+        .from("allocations")
+        .select("*")
+        .eq("transaction_id", transactionId)
+        .eq("participant_id", cp.participant_id)
+        .eq("method", "FreeInput")
+        .maybeSingle();
+      if (allocError) return res.status(500).json({ error: allocError.message });
+      if (!alloc) return res.status(404).json({ error: "Deklarasi untuk transaksi ini tidak ditemukan." });
+      // Only an untouched or previously-rejected declaration can be
+      // (re)submitted — one already Pending or Approved must go through the
+      // admin review flow instead of being silently overwritten here.
+      if (alloc.status !== "AwaitingInput" && alloc.status !== "Rejected") {
+        return res.status(400).json({ error: "Deklarasi ini sudah dikirim dan sedang menunggu, atau sudah disetujui." });
+      }
+
+      const roundedAmount = Math.round(Number(amount));
+      const { error: updateError } = await supabaseAdmin
+        .from("allocations")
+        .update({ raw_amount: roundedAmount, rounded_amount: roundedAmount, status: "Pending", rejection_reason: null })
+        .eq("id", alloc.id);
+      if (updateError) return res.status(500).json({ error: updateError.message });
+
+      await logActivity(null, "transaction", transactionId, "free_input_declared", "participant", {
+        participantId: cp.participant_id,
+        amount: roundedAmount,
+      });
+
+      return res.json({ success: true });
     }
   }
 

@@ -58,6 +58,11 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
   const [categoryParticipants, setCategoryParticipants] = useState<Participant[]>([]);
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
 
+  // Participants who will self-declare their own share for this transaction
+  // instead of the admin computing it (e.g. no receipt / unknown split) —
+  // independent of the itemized selectedParticipantIds selection above.
+  const [freeInputParticipantIds, setFreeInputParticipantIds] = useState<string[]>([]);
+
   // Quick-Add Participant States
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickAddName, setQuickAddName] = useState("");
@@ -156,6 +161,7 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
     setOtherFees(0);
     setTotal(0);
     setFormItems([]);
+    setFreeInputParticipantIds([]);
     setOcrReviewData(null);
     setShowModal(true);
   };
@@ -201,6 +207,9 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
         // Compute initially active participants from edit allocations
         const activeIds = Array.from(new Set(mappedItems.flatMap(item => item.itemAllocations.filter(a => a.weight > 0).map(a => a.participantId))));
         setSelectedParticipantIds(activeIds);
+
+        const freeInputIds = (allocDetail.freeInputAllocations || []).map((al: any) => al.participantId);
+        setFreeInputParticipantIds(freeInputIds);
       }
     } catch (err) {
       console.error(err);
@@ -708,8 +717,8 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
       onShowNotification("Expense classification selection is required (*).", "error");
       return;
     }
-    if (formItems.length === 0) {
-      onShowNotification("Please add at least one line item.", "error");
+    if (formItems.length === 0 && freeInputParticipantIds.length === 0) {
+      onShowNotification("Please add at least one line item, or mark a participant for free input.", "error");
       return;
     }
 
@@ -759,7 +768,8 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
       expenseClassification,
       items: formItems,
       description,
-      notes
+      notes,
+      freeInputParticipantIds
     };
 
     try {
@@ -1253,10 +1263,51 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
                 )}
               </div>
 
+              {/* Free Input Participants — participants who self-declare their own
+                  share instead of admin computing it via items (e.g. no receipt,
+                  unknown per-person split). Independent of the itemized selection above. */}
+              <div className="bg-white/[0.02] border border-white/5 p-4 space-y-3">
+                <div>
+                  <label className="text-[11px] font-mono uppercase tracking-widest font-bold text-white/70">
+                    Peserta Input Bebas ({freeInputParticipantIds.length})
+                  </label>
+                  <p className="text-[10px] text-[#F9F9F7]/40 mt-1 leading-relaxed">
+                    Peserta yang ditandai di sini akan mengisi sendiri nominal tanggungan mereka lewat link pribadi masing-masing, lalu menunggu persetujuan admin di halaman Declarations. Tidak perlu dimasukkan ke item di atas.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {allCandidates.length === 0 ? (
+                    <span className="text-xs text-[#F9F9F7]/30 italic">Pilih kategori dan tambahkan peserta terlebih dahulu.</span>
+                  ) : (
+                    allCandidates.map(cp => {
+                      const isMarked = freeInputParticipantIds.includes(cp.id);
+                      return (
+                        <button
+                          key={cp.id}
+                          type="button"
+                          onClick={() => {
+                            setFreeInputParticipantIds(prev =>
+                              isMarked ? prev.filter(id => id !== cp.id) : [...prev, cp.id]
+                            );
+                          }}
+                          className={`px-3 py-1.5 text-xs font-sans font-medium border cursor-pointer transition-colors ${
+                            isMarked
+                              ? "bg-amber-500/10 border-amber-500/40 text-amber-300"
+                              : "bg-white/[0.02] border-white/10 text-[#F9F9F7]/60 hover:text-white hover:border-white/20"
+                          }`}
+                        >
+                          {cp.fullName}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-[10px] font-mono font-bold uppercase tracking-widest text-[#F9F9F7]/50 mb-2">Transaction Date</label>
-                  <input 
+                  <input
                     type="date"
                     required
                     value={date}

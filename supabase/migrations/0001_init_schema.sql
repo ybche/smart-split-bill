@@ -185,10 +185,15 @@ create table allocations (
   item_id uuid references transaction_items(id) on delete cascade,
   charge_type text check (charge_type in ('tax', 'serviceCharge', 'discount', 'otherFees')),
   participant_id uuid not null references participants(id) on delete cascade,
-  method text not null check (method in ('Equal', 'Ratio', 'Percentage', 'Custom', 'Quantity', 'Hybrid')),
+  method text not null check (method in ('Equal', 'Ratio', 'Percentage', 'Custom', 'Quantity', 'Hybrid', 'FreeInput')),
   inputs numeric,
   raw_amount numeric not null default 0,
-  rounded_amount integer not null default 0
+  rounded_amount integer not null default 0,
+  -- Only meaningful for method = 'FreeInput' rows (a participant self-declares
+  -- their own share instead of admin computing it via the split engine).
+  -- Every other row defaults to 'Approved' and is untouched by this lifecycle.
+  status text not null default 'Approved' check (status in ('AwaitingInput', 'Pending', 'Approved', 'Rejected')),
+  rejection_reason text
 );
 create index allocations_transaction_id_idx on allocations(transaction_id);
 create index allocations_participant_id_idx on allocations(participant_id);

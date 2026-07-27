@@ -141,7 +141,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       supabaseAdmin
         .from("allocations")
         .select("*, transactions!inner(category_id)")
-        .eq("transactions.category_id", categoryId),
+        .eq("transactions.category_id", categoryId)
+        .eq("status", "Approved"),
     ]);
     if (cpError) return res.status(500).json({ error: cpError.message });
     if (txError) return res.status(500).json({ error: txError.message });

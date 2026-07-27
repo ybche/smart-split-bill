@@ -65,6 +65,11 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
   const [detailTx, setDetailTx] = useState<any | null>(null);
   const [expandedTxIds, setExpandedTxIds] = useState<string[]>([]);
 
+  // Free-input declarations: transactions where this participant self-reports
+  // their own share (no admin-computed obligation yet). Keyed by transactionId.
+  const [freeInputDrafts, setFreeInputDrafts] = useState<Record<string, string>>({});
+  const [submittingFreeInput, setSubmittingFreeInput] = useState<string | null>(null);
+
   const toggleExpandTx = (id: string) => {
     setExpandedTxIds(prev => 
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
@@ -119,6 +124,42 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
       fetchPortalDetails();
     }
   }, [token]);
+
+  const handleSubmitFreeInput = async (transactionId: string) => {
+    const raw = freeInputDrafts[transactionId];
+    const amount = Number(raw);
+    if (!raw || isNaN(amount) || amount < 0) {
+      onShowNotification("Masukkan nominal yang valid.", "error");
+      return;
+    }
+
+    setSubmittingFreeInput(transactionId);
+    try {
+      const res = await fetch(`/api/public/pay-portal/${token}/free-input`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transactionId, amount })
+      });
+
+      if (res.ok) {
+        onShowNotification("Nominal berhasil dikirim, menunggu persetujuan admin.", "success");
+        setFreeInputDrafts(prev => {
+          const next = { ...prev };
+          delete next[transactionId];
+          return next;
+        });
+        await fetchPortalDetails();
+      } else {
+        const err = await res.json();
+        onShowNotification(err.error || "Gagal mengirim nominal.", "error");
+      }
+    } catch (err) {
+      console.error(err);
+      onShowNotification("Terjadi kesalahan jaringan saat mengirim nominal.", "error");
+    } finally {
+      setSubmittingFreeInput(null);
+    }
+  };
 
   // Handle individual transaction checkboxes (Partial Payments selection 11.2)
   const handleToggleTxSelection = (txId: string, txAmount: number) => {
@@ -251,7 +292,7 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
     );
   }
 
-  const { participant, category, totals: memberTotals, payableTransactions, activeSubmissions } = portalData;
+  const { participant, category, totals: memberTotals, payableTransactions, activeSubmissions, declarationsNeeded, pendingDeclarations } = portalData;
   const currentParticipantName = participant?.nickname || participant?.fullName || "Anda";
   const isFullyReimbursed = memberTotals.verifiedPaid >= memberTotals.totalOriginalObligation && memberTotals.totalOriginalObligation > 0;
 
@@ -346,6 +387,67 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
             </div>
           )}
         </div>
+
+        {/* Free-input declarations — transactions with no fixed price/split
+            (e.g. no receipt) where this participant self-reports their share. */}
+        {((declarationsNeeded && declarationsNeeded.length > 0) || (pendingDeclarations && pendingDeclarations.length > 0)) && (
+          <div className="px-6 py-4 border-b border-slate-100 bg-amber-50/40 space-y-3">
+            <span className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider block">Perlu Input Kamu</span>
+
+            {(declarationsNeeded || []).map((d: any) => (
+              <div key={d.transactionId} className="p-3.5 bg-white border border-amber-200 rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="font-bold text-sm text-slate-800 block">{d.title}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">{d.categoryName} • {d.date ? new Date(d.date).toLocaleDateString("id-ID", { dateStyle: "medium" }) : "—"}</span>
+                  </div>
+                </div>
+
+                {d.status === "Rejected" && (
+                  <div className="p-2.5 bg-rose-50 border border-rose-150 rounded-lg text-[11px] text-rose-700">
+                    <span className="font-bold block mb-0.5">Deklarasi sebelumnya ditolak</span>
+                    Alasan: "{d.rejectionReason}". Silakan input ulang nominalnya.
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">IDR</span>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="Nominal tanggungan kamu"
+                      value={freeInputDrafts[d.transactionId] ?? ""}
+                      onChange={(e) => setFreeInputDrafts(prev => ({ ...prev, [d.transactionId]: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-3 py-2 font-mono font-bold text-xs focus:outline-none focus:border-indigo-600 focus:bg-white text-slate-800"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    disabled={submittingFreeInput === d.transactionId}
+                    onClick={() => handleSubmitFreeInput(d.transactionId)}
+                    className="shrink-0 px-4 py-2 bg-slate-950 hover:bg-slate-900 text-white font-semibold text-xs rounded-lg cursor-pointer disabled:opacity-50"
+                  >
+                    {submittingFreeInput === d.transactionId ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : (d.status === "Rejected" ? "Kirim Ulang" : "Kirim")}
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {(pendingDeclarations || []).map((d: any) => (
+              <div key={d.transactionId} className="p-3.5 bg-white border border-amber-150 rounded-xl flex items-center justify-between gap-2">
+                <div>
+                  <span className="font-bold text-sm text-slate-800 block">{d.title}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">{d.categoryName}</span>
+                </div>
+                <div className="text-right">
+                  <span className="font-mono font-bold text-xs text-slate-700 block">{formatIDR(d.declaredAmount)}</span>
+                  <span className="text-[9px] text-amber-600 font-mono uppercase tracking-wider">Menunggu Review</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Tabs for Active Billing and Payment History */}
         <div className="grid grid-cols-2 border-b border-slate-100 font-mono text-[10px] font-bold tracking-widest uppercase bg-slate-50/50">

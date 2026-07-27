@@ -79,9 +79,12 @@ export async function getPortalData(token: string) {
   const participantsById = new Map((allParticipants ?? []).map((p: any) => [p.id, p]));
 
   // All allocations for this transaction set (any participant), needed for "sharesWith".
+  // Approved-only: a participant who still has an unreviewed free-input
+  // declaration isn't a confirmed co-payer yet.
   const { data: allTxAllocationsRaw } = await supabaseAdmin
     .from("allocations")
     .select("*")
+    .eq("status", "Approved")
     .in("transaction_id", Array.from(transactionsById.keys()).length ? Array.from(transactionsById.keys()) : ["00000000-0000-0000-0000-000000000000"]);
   const allTxAllocationsByTx = new Map<string, any[]>();
   (allTxAllocationsRaw ?? []).forEach((al: any) => {
@@ -97,6 +100,12 @@ export async function getPortalData(token: string) {
 
   const outstandingList: any[] = [];
   const payableTransactions: any[] = [];
+  // Free-input declarations this participant still needs to act on (never
+  // submitted, or rejected and awaiting resubmission) vs. ones already
+  // submitted and waiting on the admin — neither counts toward obligations
+  // yet, so they're surfaced separately rather than mixed into the lists above.
+  const declarationsNeeded: any[] = [];
+  const pendingDeclarations: any[] = [];
   let totalOriginalObligation = 0;
 
   for (const activeCP of activeCPs ?? []) {
@@ -106,7 +115,24 @@ export async function getPortalData(token: string) {
     const categoryTransactions = (allTransactions ?? []).filter((t: any) => t.category_id === activeCP.category_id);
 
     for (const t of categoryTransactions) {
-      const allocations = (allAllocations ?? []).filter((al: any) => al.transaction_id === t.id);
+      const allTxAllocsForParticipant = (allAllocations ?? []).filter((al: any) => al.transaction_id === t.id);
+      const freeInputAlloc = allTxAllocsForParticipant.find((al: any) => al.method === "FreeInput");
+
+      if (freeInputAlloc && (freeInputAlloc.status === "AwaitingInput" || freeInputAlloc.status === "Rejected")) {
+        declarationsNeeded.push({
+          transactionId: t.id, title: t.title, merchant: t.merchant, date: t.date, categoryName: cat.name,
+          status: freeInputAlloc.status, rejectionReason: freeInputAlloc.rejection_reason || undefined,
+        });
+      } else if (freeInputAlloc && freeInputAlloc.status === "Pending") {
+        pendingDeclarations.push({
+          transactionId: t.id, title: t.title, merchant: t.merchant, date: t.date, categoryName: cat.name,
+          declaredAmount: freeInputAlloc.rounded_amount,
+        });
+      }
+
+      // Only approved allocations (whether split-engine or an approved
+      // free-input declaration) count as a real, payable obligation.
+      const allocations = allTxAllocsForParticipant.filter((al: any) => al.status === "Approved");
       if (allocations.length === 0) continue;
 
       const obligationAmount = allocations.reduce((sum: number, al: any) => sum + al.rounded_amount, 0);
@@ -228,7 +254,7 @@ export async function getPortalData(token: string) {
         const t = transactionsById.get(txId);
         if (!t) return null;
         const cat = categoriesById.get(t.category_id);
-        const allocations = (allAllocations ?? []).filter((al: any) => al.transaction_id === t.id);
+        const allocations = (allAllocations ?? []).filter((al: any) => al.transaction_id === t.id && al.status === "Approved");
         const obligationAmount = allocations.reduce((sum: number, al: any) => sum + al.rounded_amount, 0);
 
         const txItems = itemsByTx.get(t.id) || [];
@@ -313,6 +339,8 @@ export async function getPortalData(token: string) {
       paymentHistory: enrichedPaymentHistory,
       activeSubmissions,
       recentRejected,
+      declarationsNeeded,
+      pendingDeclarations,
     },
   } as const;
 }
