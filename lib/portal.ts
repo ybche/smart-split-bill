@@ -100,12 +100,6 @@ export async function getPortalData(token: string) {
 
   const outstandingList: any[] = [];
   const payableTransactions: any[] = [];
-  // Free-input declarations this participant still needs to act on (never
-  // submitted, or rejected and awaiting resubmission) vs. ones already
-  // submitted and waiting on the admin — neither counts toward obligations
-  // yet, so they're surfaced separately rather than mixed into the lists above.
-  const declarationsNeeded: any[] = [];
-  const pendingDeclarations: any[] = [];
   let totalOriginalObligation = 0;
 
   for (const activeCP of activeCPs ?? []) {
@@ -116,26 +110,17 @@ export async function getPortalData(token: string) {
 
     for (const t of categoryTransactions) {
       const allTxAllocsForParticipant = (allAllocations ?? []).filter((al: any) => al.transaction_id === t.id);
-      const freeInputAlloc = allTxAllocsForParticipant.find((al: any) => al.method === "FreeInput");
-
-      if (freeInputAlloc && (freeInputAlloc.status === "AwaitingInput" || freeInputAlloc.status === "Rejected")) {
-        declarationsNeeded.push({
-          transactionId: t.id, title: t.title, merchant: t.merchant, date: t.date, categoryName: cat.name,
-          status: freeInputAlloc.status, rejectionReason: freeInputAlloc.rejection_reason || undefined,
-        });
-      } else if (freeInputAlloc && freeInputAlloc.status === "Pending") {
-        pendingDeclarations.push({
-          transactionId: t.id, title: t.title, merchant: t.merchant, date: t.date, categoryName: cat.name,
-          declaredAmount: freeInputAlloc.rounded_amount,
-        });
-      }
+      if (allTxAllocsForParticipant.length === 0) continue;
 
       // Only approved allocations (whether split-engine or an approved
-      // free-input declaration) count as a real, payable obligation.
-      const allocations = allTxAllocsForParticipant.filter((al: any) => al.status === "Approved");
-      if (allocations.length === 0) continue;
+      // free-input item declaration) count as a real, payable obligation. A
+      // free-input item still AwaitingInput/Pending/Rejected surfaces inside
+      // assignedItems below so the participant can act on it inline, but
+      // contributes nothing to the obligation total until approved.
+      const approvedAllocations = allTxAllocsForParticipant.filter((al: any) => al.status === "Approved");
+      const hasUnresolvedFreeInput = allTxAllocsForParticipant.some((al: any) => al.method === "FreeInput" && al.status !== "Approved");
 
-      const obligationAmount = allocations.reduce((sum: number, al: any) => sum + al.rounded_amount, 0);
+      const obligationAmount = approvedAllocations.reduce((sum: number, al: any) => sum + al.rounded_amount, 0);
 
       const paymentsForTx = (allSubmissions ?? []).filter((ps: any) => (ps.selected_obligations || []).includes(t.id));
 
@@ -154,53 +139,54 @@ export async function getPortalData(token: string) {
       totalOriginalObligation += obligationAmount;
 
       const hasPendingOrPaid = paymentsForTx.some((p: any) => p.status === "Paid" || p.status === "Pending Verification");
-      if (hasPendingOrPaid || remainingAmount <= 0) continue;
+      if (hasPendingOrPaid || (remainingAmount <= 0 && !hasUnresolvedFreeInput)) continue;
 
       const txItems = itemsByTx.get(t.id) || [];
-      const outstandingItems = txItems
-        .map((it: any) => {
-          const itemAlloc = allocations.find((al: any) => al.item_id === it.id);
-          if (!itemAlloc) return null;
-          return {
-            name: it.name,
-            quantity: it.quantity,
-            unitPrice: it.unit_price,
-            lineTotal: it.line_total,
-            participantShare: itemAlloc.rounded_amount,
-          };
-        })
-        .filter(Boolean);
 
-      const assignedItems = txItems
-        .map((it: any) => {
-          const itemAlloc = allocations.find((al: any) => al.item_id === it.id);
-          if (!itemAlloc) return null;
-          const itemAllocations = (allTxAllocationsByTx.get(t.id) || []).filter((al: any) => al.item_id === it.id);
-          const itemParticipantIds = Array.from(new Set(itemAllocations.map((al: any) => al.participant_id)));
-          const otherItemParticipantIds = itemParticipantIds.filter((pId) => pId !== cp.participant_id);
-          const allItemParticipantNames = itemParticipantIds.map(nameOf).filter(Boolean);
-          const itemSharesWith = otherItemParticipantIds
-            .map((pId: any) => {
-              const p = participantsById.get(pId);
-              return p ? { id: p.id, fullName: p.full_name, nickname: p.nickname || p.full_name } : null;
-            })
-            .filter(Boolean);
+      const buildItemEntry = (it: any) => {
+        const itemAlloc = allTxAllocsForParticipant.find((al: any) => al.item_id === it.id);
+        if (!itemAlloc) return null;
+        const isFreeInput = itemAlloc.method === "FreeInput";
 
-          return {
-            id: it.id,
-            name: it.name,
-            quantity: it.quantity,
-            unitPrice: it.unit_price,
-            lineTotal: it.line_total,
-            allocatedAmount: itemAlloc.rounded_amount,
-            sharesWith: itemSharesWith,
-            sharedByNames: allItemParticipantNames,
-            participantCount: itemParticipantIds.length,
-          };
-        })
-        .filter(Boolean);
+        const itemAllocations = (allTxAllocationsByTx.get(t.id) || []).filter((al: any) => al.item_id === it.id);
+        const itemParticipantIds = Array.from(new Set(itemAllocations.map((al: any) => al.participant_id)));
+        const otherItemParticipantIds = itemParticipantIds.filter((pId) => pId !== cp.participant_id);
+        const allItemParticipantNames = itemParticipantIds.map(nameOf).filter(Boolean);
+        const itemSharesWith = otherItemParticipantIds
+          .map((pId: any) => {
+            const p = participantsById.get(pId);
+            return p ? { id: p.id, fullName: p.full_name, nickname: p.nickname || p.full_name } : null;
+          })
+          .filter(Boolean);
 
-      const chargesAllocated = allocations.filter((al: any) => !al.item_id).reduce((sum: number, al: any) => sum + al.rounded_amount, 0);
+        return {
+          id: it.id,
+          name: it.name,
+          quantity: it.quantity,
+          unitPrice: it.unit_price,
+          lineTotal: it.line_total,
+          allocatedAmount: itemAlloc.status === "Approved" ? itemAlloc.rounded_amount : 0,
+          sharesWith: itemSharesWith,
+          sharedByNames: allItemParticipantNames,
+          participantCount: itemParticipantIds.length,
+          // Free-input specific metadata — undefined for normal split-engine items.
+          isFreeInput,
+          freeInputAllocationId: isFreeInput ? itemAlloc.id : undefined,
+          freeInputStatus: isFreeInput ? itemAlloc.status : undefined,
+          freeInputDeclaredAmount: isFreeInput && itemAlloc.status !== "AwaitingInput" ? itemAlloc.rounded_amount : undefined,
+          freeInputRejectionReason: isFreeInput ? (itemAlloc.rejection_reason || undefined) : undefined,
+        };
+      };
+
+      const assignedItems = txItems.map(buildItemEntry).filter(Boolean);
+      const outstandingItems = assignedItems.map((entry: any) => ({
+        name: entry.name, quantity: entry.quantity, unitPrice: entry.unitPrice, lineTotal: entry.lineTotal,
+        participantShare: entry.allocatedAmount, isFreeInput: entry.isFreeInput, freeInputStatus: entry.freeInputStatus,
+        freeInputDeclaredAmount: entry.freeInputDeclaredAmount, freeInputRejectionReason: entry.freeInputRejectionReason,
+        freeInputAllocationId: entry.freeInputAllocationId,
+      }));
+
+      const chargesAllocated = approvedAllocations.filter((al: any) => !al.item_id).reduce((sum: number, al: any) => sum + al.rounded_amount, 0);
 
       const allTxAllocations = allTxAllocationsByTx.get(t.id) || [];
       const otherParticipantIds = Array.from(new Set(allTxAllocations.filter((al: any) => al.participant_id !== cp.participant_id).map((al: any) => al.participant_id)));
@@ -213,7 +199,7 @@ export async function getPortalData(token: string) {
       const participantCount = new Set(allTxAllocations.map((al: any) => al.participant_id)).size;
 
       const payerName = t.payer_id === "administrator" ? "Administrator" : participantsById.get(t.payer_id)?.full_name || "Payer";
-      const charges = allocations.filter((al: any) => !al.item_id).map((al: any) => ({ type: al.charge_type, amount: al.rounded_amount }));
+      const charges = approvedAllocations.filter((al: any) => !al.item_id).map((al: any) => ({ type: al.charge_type, amount: al.rounded_amount }));
 
       outstandingList.push({
         transactionId: t.id, title: t.title, merchant: t.merchant, date: t.date, categoryName: cat.name,
@@ -339,8 +325,6 @@ export async function getPortalData(token: string) {
       paymentHistory: enrichedPaymentHistory,
       activeSubmissions,
       recentRejected,
-      declarationsNeeded,
-      pendingDeclarations,
     },
   } as const;
 }

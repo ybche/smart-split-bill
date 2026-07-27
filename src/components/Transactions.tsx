@@ -18,8 +18,54 @@ interface FormItem {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
-  splitMethod: "Equal" | "Ratio" | "Percentage" | "Custom" | "Quantity";
-  itemAllocations: Array<{ participantId: string; weight: number }>; // weight maps to weight, custom amount, percentage, or quantity
+  splitMethod: "Equal" | "Ratio" | "Percentage" | "Custom" | "Quantity" | "FreeInput";
+  itemAllocations: Array<{ participantId: string; weight: number }>; // weight maps to weight, custom amount, percentage, or quantity — for FreeInput items, weight is just an inclusion flag (0 or 1), not a price weight
+  // Existing free-input declarations for this item, keyed by participantId
+  // (only populated when editing an existing transaction).
+  freeInputDeclarations?: Record<string, { allocationId: string; status: string; amount: number; rejectionReason?: string }>;
+}
+
+function FreeInputDeclarationBadge({ declaration, formatIDR, onApprove, onReject }: {
+  declaration: { status: string; amount: number; rejectionReason?: string };
+  formatIDR: (val: number) => string;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  if (declaration.status === "AwaitingInput") {
+    return <span className="text-[10px] text-[#F9F9F7]/30 italic">Belum diisi peserta</span>;
+  }
+  if (declaration.status === "Approved") {
+    return <span className="text-[10px] text-emerald-400 font-bold">{formatIDR(declaration.amount)} (Approved)</span>;
+  }
+  if (declaration.status === "Rejected") {
+    return (
+      <span className="text-[10px] text-rose-400" title={declaration.rejectionReason}>
+        Ditolak: {formatIDR(declaration.amount)}
+      </span>
+    );
+  }
+  // Pending — awaiting admin review.
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10px] text-amber-400 font-bold">{formatIDR(declaration.amount)}</span>
+      <button
+        type="button"
+        onClick={onApprove}
+        className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 p-1 transition-all cursor-pointer"
+        title="Setujui deklarasi"
+      >
+        <CheckCircle className="w-3 h-3" />
+      </button>
+      <button
+        type="button"
+        onClick={onReject}
+        className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 p-1 transition-all cursor-pointer"
+        title="Tolak deklarasi"
+      >
+        <X className="w-3 h-3" />
+      </button>
+    </div>
+  );
 }
 
 export default function Transactions({ token, onNavigate, onShowNotification }: TransactionsProps) {
@@ -57,11 +103,6 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
   // Category specific participants mapping (used for splitting checkboxes)
   const [categoryParticipants, setCategoryParticipants] = useState<Participant[]>([]);
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
-
-  // Participants who will self-declare their own share for this transaction
-  // instead of the admin computing it (e.g. no receipt / unknown split) —
-  // independent of the itemized selectedParticipantIds selection above.
-  const [freeInputParticipantIds, setFreeInputParticipantIds] = useState<string[]>([]);
 
   // Quick-Add Participant States
   const [showQuickAdd, setShowQuickAdd] = useState(false);
@@ -161,9 +202,55 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
     setOtherFees(0);
     setTotal(0);
     setFormItems([]);
-    setFreeInputParticipantIds([]);
     setOcrReviewData(null);
     setShowModal(true);
+  };
+
+  // Loads items + their allocations (including free-input declarations, any
+  // status) into the form. Shared by the edit-modal open flow and by the
+  // approve/reject handlers, which need to refresh the same view in place.
+  const loadFormItemsFromAllocations = async (txId: string) => {
+    const res = await fetch(`/api/transactions/${txId}/allocations`, {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+
+    const allocDetail = await res.json();
+    const mappedItems: FormItem[] = allocDetail.items.map((it: any) => {
+      // An item's allocations are either all split-engine rows or all
+      // FreeInput rows — never mixed — since splitMethod is set per item.
+      const isFreeInputItem = it.allocations.length > 0 && it.allocations.every((al: any) => al.method === "FreeInput");
+      const freeInputDeclarations: Record<string, any> = {};
+      if (isFreeInputItem) {
+        it.allocations.forEach((al: any) => {
+          freeInputDeclarations[al.participantId] = {
+            allocationId: al.id,
+            status: al.status,
+            amount: al.roundedAmount,
+            rejectionReason: al.rejectionReason,
+          };
+        });
+      }
+
+      return {
+        id: it.id,
+        name: it.name,
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        lineTotal: it.lineTotal,
+        splitMethod: isFreeInputItem ? "FreeInput" : "Equal", // Default mapping back as custom ratios are preserved on the server allocations list
+        itemAllocations: it.allocations.map((al: any) => ({
+          participantId: al.participantId,
+          weight: isFreeInputItem ? 1 : (al.roundedAmount > 0 ? 1 : 0)
+        })),
+        freeInputDeclarations: isFreeInputItem ? freeInputDeclarations : undefined,
+      };
+    });
+    setFormItems(mappedItems);
+
+    // Compute initially active participants from edit allocations
+    const activeIds = Array.from(new Set(mappedItems.flatMap(item => item.itemAllocations.filter(a => a.weight > 0).map(a => a.participantId))));
+    setSelectedParticipantIds(activeIds);
   };
 
   const handleOpenEditModal = async (tx: Transaction) => {
@@ -183,39 +270,60 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
     setOtherFees(tx.otherFees);
     setTotal(tx.total);
 
-    // Fetch allocations for this transaction to populate formItems
     try {
-      const res = await fetch(`/api/transactions/${tx.id}/allocations`, {
-        headers: { "Authorization": `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const allocDetail = await res.json();
-        const mappedItems: FormItem[] = allocDetail.items.map((it: any) => ({
-          id: it.id,
-          name: it.name,
-          quantity: it.quantity,
-          unitPrice: it.unitPrice,
-          lineTotal: it.lineTotal,
-          splitMethod: "Equal", // Default mapping back as custom ratios are preserved on the server allocations list
-          itemAllocations: it.allocations.map((al: any) => ({
-            participantId: al.participantId,
-            weight: al.roundedAmount > 0 ? 1 : 0
-          }))
-        }));
-        setFormItems(mappedItems);
-
-        // Compute initially active participants from edit allocations
-        const activeIds = Array.from(new Set(mappedItems.flatMap(item => item.itemAllocations.filter(a => a.weight > 0).map(a => a.participantId))));
-        setSelectedParticipantIds(activeIds);
-
-        const freeInputIds = (allocDetail.freeInputAllocations || []).map((al: any) => al.participantId);
-        setFreeInputParticipantIds(freeInputIds);
-      }
+      await loadFormItemsFromAllocations(tx.id);
     } catch (err) {
       console.error(err);
     }
 
     setShowModal(true);
+  };
+
+  const handleApproveFreeInput = async (allocationId: string) => {
+    if (!editingId) return;
+    try {
+      const res = await fetch(`/api/transactions/${editingId}/free-input/${allocationId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ action: "approve" })
+      });
+      if (res.ok) {
+        onShowNotification("Deklarasi peserta disetujui.", "success");
+        await loadFormItemsFromAllocations(editingId);
+        fetchTransactionsData();
+      } else {
+        const err = await res.json();
+        onShowNotification(err.error || "Gagal menyetujui deklarasi.", "error");
+      }
+    } catch (err) {
+      console.error(err);
+      onShowNotification("Terjadi kesalahan jaringan.", "error");
+    }
+  };
+
+  const handleRejectFreeInput = async (allocationId: string) => {
+    if (!editingId) return;
+    const reason = window.prompt("Alasan penolakan deklarasi ini:");
+    if (!reason) return;
+
+    try {
+      const res = await fetch(`/api/transactions/${editingId}/free-input/${allocationId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ action: "reject", rejectionReason: reason })
+      });
+      if (res.ok) {
+        onShowNotification("Deklarasi peserta ditolak.", "success");
+        await loadFormItemsFromAllocations(editingId);
+        fetchTransactionsData();
+      } else {
+        const err = await res.json();
+        onShowNotification(err.error || "Gagal menolak deklarasi.", "error");
+      }
+    } catch (err) {
+      console.error(err);
+      onShowNotification("Terjadi kesalahan jaringan.", "error");
+    }
   };
 
   const handleDeleteTransaction = async (txId: string, force = false) => {
@@ -717,8 +825,8 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
       onShowNotification("Expense classification selection is required (*).", "error");
       return;
     }
-    if (formItems.length === 0 && freeInputParticipantIds.length === 0) {
-      onShowNotification("Please add at least one line item, or mark a participant for free input.", "error");
+    if (formItems.length === 0) {
+      onShowNotification("Please add at least one line item.", "error");
       return;
     }
 
@@ -768,8 +876,7 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
       expenseClassification,
       items: formItems,
       description,
-      notes,
-      freeInputParticipantIds
+      notes
     };
 
     try {
@@ -981,7 +1088,17 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
                   return (
                     <tr key={tx.id} className="hover:bg-white/[0.01] transition-colors">
                       <td className="px-6 py-4">
-                        <span className="font-semibold text-white block">{tx.title}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-white block">{tx.title}</span>
+                          {!!tx.pendingFreeInputCount && (
+                            <span
+                              className="text-[9px] font-mono font-bold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/30 px-1.5 py-0.5"
+                              title="Deklarasi peserta menunggu persetujuan — buka & edit transaksi ini untuk meninjau"
+                            >
+                              {tx.pendingFreeInputCount} Menunggu
+                            </span>
+                          )}
+                        </div>
                         {tx.merchant && tx.merchant !== tx.title && (
                           <span className="text-[10px] text-white/40 font-mono mt-1 block uppercase tracking-wider">{tx.merchant}</span>
                         )}
@@ -1263,47 +1380,6 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
                 )}
               </div>
 
-              {/* Free Input Participants — participants who self-declare their own
-                  share instead of admin computing it via items (e.g. no receipt,
-                  unknown per-person split). Independent of the itemized selection above. */}
-              <div className="bg-white/[0.02] border border-white/5 p-4 space-y-3">
-                <div>
-                  <label className="text-[11px] font-mono uppercase tracking-widest font-bold text-white/70">
-                    Peserta Input Bebas ({freeInputParticipantIds.length})
-                  </label>
-                  <p className="text-[10px] text-[#F9F9F7]/40 mt-1 leading-relaxed">
-                    Peserta yang ditandai di sini akan mengisi sendiri nominal tanggungan mereka lewat link pribadi masing-masing, lalu menunggu persetujuan admin di halaman Declarations. Tidak perlu dimasukkan ke item di atas.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {allCandidates.length === 0 ? (
-                    <span className="text-xs text-[#F9F9F7]/30 italic">Pilih kategori dan tambahkan peserta terlebih dahulu.</span>
-                  ) : (
-                    allCandidates.map(cp => {
-                      const isMarked = freeInputParticipantIds.includes(cp.id);
-                      return (
-                        <button
-                          key={cp.id}
-                          type="button"
-                          onClick={() => {
-                            setFreeInputParticipantIds(prev =>
-                              isMarked ? prev.filter(id => id !== cp.id) : [...prev, cp.id]
-                            );
-                          }}
-                          className={`px-3 py-1.5 text-xs font-sans font-medium border cursor-pointer transition-colors ${
-                            isMarked
-                              ? "bg-amber-500/10 border-amber-500/40 text-amber-300"
-                              : "bg-white/[0.02] border-white/10 text-[#F9F9F7]/60 hover:text-white hover:border-white/20"
-                          }`}
-                        >
-                          {cp.fullName}
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-[10px] font-mono font-bold uppercase tracking-widest text-[#F9F9F7]/50 mb-2">Transaction Date</label>
@@ -1420,16 +1496,17 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
                             />
                           </div>
                           <div className="md:col-span-2">
-                            <input 
+                            <input
                               type="number"
-                              placeholder="Unit Price"
-                              value={item.unitPrice || ""}
+                              placeholder={item.splitMethod === "FreeInput" ? "—" : "Unit Price"}
+                              disabled={item.splitMethod === "FreeInput"}
+                              value={item.splitMethod === "FreeInput" ? "" : (item.unitPrice || "")}
                               onChange={(e) => updateFormItemField(item.id, "unitPrice", Number(e.target.value))}
-                              className="w-full bg-white/[0.02] border border-white/10 rounded-none px-3 py-2 text-xs text-white text-right focus:outline-none font-mono"
+                              className="w-full bg-white/[0.02] border border-white/10 rounded-none px-3 py-2 text-xs text-white text-right focus:outline-none font-mono disabled:opacity-30"
                             />
                           </div>
                           <div className="md:col-span-2">
-                            <select 
+                            <select
                               value={item.splitMethod}
                               onChange={(e) => updateFormItemField(item.id, "splitMethod", e.target.value as any)}
                               className="w-full bg-white/[0.02] border border-white/10 rounded-none px-2 py-2 text-xs text-white focus:outline-none focus:border-blue-500 font-mono cursor-pointer"
@@ -1439,10 +1516,15 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
                               <option value="Percentage" className="bg-[#121214]">Percentage</option>
                               <option value="Custom" className="bg-[#121214]">Custom Amount</option>
                               <option value="Quantity" className="bg-[#121214]">Quantity</option>
+                              <option value="FreeInput" className="bg-[#121214]">Free Input (Peserta Sendiri)</option>
                             </select>
                           </div>
-                          <div className="md:col-span-2 text-right font-bold text-white text-xs font-mono pr-2">
-                            {formatIDR(item.lineTotal)}
+                          <div className="md:col-span-2 text-right font-bold text-xs font-mono pr-2">
+                            {item.splitMethod === "FreeInput" ? (
+                              <span className="text-amber-400">Bebas oleh peserta</span>
+                            ) : (
+                              <span className="text-white">{formatIDR(item.lineTotal)}</span>
+                            )}
                           </div>
                           <div className="md:col-span-1 text-center">
                             <button 
@@ -1460,7 +1542,9 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                             <div className="flex items-center gap-2">
                               <span className="text-[10px] font-bold uppercase tracking-wider text-[#F9F9F7]/40">
-                                Allocate Split Members ({item.splitMethod} Split):
+                                {item.splitMethod === "FreeInput"
+                                  ? "Peserta yang mengisi nominal sendiri:"
+                                  : `Allocate Split Members (${item.splitMethod} Split):`}
                               </span>
                               {selectedParticipantIds.length > 0 && (
                                 <div className="flex gap-1.5 text-[9px] uppercase font-bold">
@@ -1517,8 +1601,8 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
                                     <span className="font-sans font-medium">{cp.fullName}</span>
                                   </label>
 
-                                  {isAllocated && item.splitMethod !== "Equal" && (
-                                    <input 
+                                  {isAllocated && item.splitMethod !== "Equal" && item.splitMethod !== "FreeInput" && (
+                                    <input
                                       type="number"
                                       min="0.01"
                                       step="any"
@@ -1532,6 +1616,15 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
                                         updateItemParticipantWeight(item.id, cp.id, Number(e.target.value));
                                       }}
                                       className="w-16 bg-white/10 border border-white/20 rounded-none px-1.5 py-0.5 text-center text-xs text-white font-mono focus:outline-none focus:border-blue-500"
+                                    />
+                                  )}
+
+                                  {isAllocated && item.splitMethod === "FreeInput" && item.freeInputDeclarations?.[cp.id] && (
+                                    <FreeInputDeclarationBadge
+                                      declaration={item.freeInputDeclarations[cp.id]}
+                                      formatIDR={formatIDR}
+                                      onApprove={() => handleApproveFreeInput(item.freeInputDeclarations![cp.id].allocationId)}
+                                      onReject={() => handleRejectFreeInput(item.freeInputDeclarations![cp.id].allocationId)}
                                     />
                                   )}
                                 </div>

@@ -8,17 +8,19 @@ import { supabaseAdmin } from "./supabaseAdmin.js";
 //   AwaitingInput -> (participant submits) -> Pending -> Approved | Rejected
 // Only 'Approved' rows count toward obligation totals anywhere in the app.
 
-// Creates the initial "please declare your share" placeholder rows for a
-// transaction. Participants who already have a FreeInput row here (in any
-// status) are skipped, so this is safe to call again on every transaction
-// edit without duplicating or clobbering an existing declaration.
-export async function createAwaitingInputRows(transactionId: string, participantIds: string[]): Promise<void> {
+// Creates the initial "please declare your share" placeholder rows for one
+// item within a transaction. Participants who already have a FreeInput row
+// for this specific item (in any status) are skipped, so this is safe to
+// call again on every transaction edit without duplicating or clobbering an
+// existing declaration.
+export async function createAwaitingInputRows(transactionId: string, itemId: string, participantIds: string[]): Promise<void> {
   if (participantIds.length === 0) return;
 
   const { data: existing, error: fetchError } = await supabaseAdmin
     .from("allocations")
     .select("participant_id")
     .eq("transaction_id", transactionId)
+    .eq("item_id", itemId)
     .eq("method", "FreeInput");
   if (fetchError) throw new Error(fetchError.message);
 
@@ -27,6 +29,7 @@ export async function createAwaitingInputRows(transactionId: string, participant
     .filter((participantId) => !existingIds.has(participantId))
     .map((participantId) => ({
       transaction_id: transactionId,
+      item_id: itemId,
       participant_id: participantId,
       method: "FreeInput",
       status: "AwaitingInput",

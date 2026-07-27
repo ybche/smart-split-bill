@@ -73,6 +73,9 @@ export interface Transaction {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+  // Count of this transaction's free-input item declarations awaiting admin
+  // review (status='Pending'). Only present on the list endpoint response.
+  pendingFreeInputCount?: number;
 }
 
 export interface TransactionItem {

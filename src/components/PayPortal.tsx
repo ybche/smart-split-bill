@@ -65,8 +65,11 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
   const [detailTx, setDetailTx] = useState<any | null>(null);
   const [expandedTxIds, setExpandedTxIds] = useState<string[]>([]);
 
-  // Free-input declarations: transactions where this participant self-reports
-  // their own share (no admin-computed obligation yet). Keyed by transactionId.
+  // Free-input items: this participant self-reports their own share of an
+  // item the admin has no fixed price for. Keyed by the item's allocation id,
+  // so typing here immediately reflects in the effective transaction totals
+  // below (Select Individual Transactions / Amount Transferred) even before
+  // the declaration is submitted or approved.
   const [freeInputDrafts, setFreeInputDrafts] = useState<Record<string, string>>({});
   const [submittingFreeInput, setSubmittingFreeInput] = useState<string | null>(null);
 
@@ -125,27 +128,27 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
     }
   }, [token]);
 
-  const handleSubmitFreeInput = async (transactionId: string) => {
-    const raw = freeInputDrafts[transactionId];
+  const handleSubmitFreeInput = async (allocationId: string) => {
+    const raw = freeInputDrafts[allocationId];
     const amount = Number(raw);
     if (!raw || isNaN(amount) || amount < 0) {
       onShowNotification("Masukkan nominal yang valid.", "error");
       return;
     }
 
-    setSubmittingFreeInput(transactionId);
+    setSubmittingFreeInput(allocationId);
     try {
       const res = await fetch(`/api/public/pay-portal/${token}/free-input`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transactionId, amount })
+        body: JSON.stringify({ allocationId, amount })
       });
 
       if (res.ok) {
         onShowNotification("Nominal berhasil dikirim, menunggu persetujuan admin.", "success");
         setFreeInputDrafts(prev => {
           const next = { ...prev };
-          delete next[transactionId];
+          delete next[allocationId];
           return next;
         });
         await fetchPortalDetails();
@@ -161,8 +164,27 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
     }
   };
 
+  // A free-input item's "amount" depends on where its declaration is in the
+  // approve/reject lifecycle: the confirmed amount once approved, what was
+  // already submitted while pending admin review, or whatever's currently
+  // typed (still editable) before that.
+  const getItemEffectiveAmount = (it: any): number => {
+    if (!it.isFreeInput) return it.allocatedAmount || 0;
+    if (it.freeInputStatus === "Approved") return it.allocatedAmount || 0;
+    if (it.freeInputStatus === "Pending") return it.freeInputDeclaredAmount || 0;
+    const draft = Number(freeInputDrafts[it.freeInputAllocationId]);
+    return isNaN(draft) ? 0 : draft;
+  };
+
+  // A transaction's true "amount you owe" — fixed items plus free-input items
+  // at whatever stage they're at, live as the participant types.
+  const getEffectiveAllocationTotal = (tx: any): number => {
+    const itemsSum = (tx.assignedItems || []).reduce((sum: number, it: any) => sum + getItemEffectiveAmount(it), 0);
+    return itemsSum + (tx.chargesAllocated || 0);
+  };
+
   // Handle individual transaction checkboxes (Partial Payments selection 11.2)
-  const handleToggleTxSelection = (txId: string, txAmount: number) => {
+  const handleToggleTxSelection = (txId: string) => {
     let nextIds = [...selectedTransactionIds];
     if (nextIds.includes(txId)) {
       nextIds = nextIds.filter(id => id !== txId);
@@ -170,13 +192,8 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
     } else {
       nextIds.push(txId);
     }
-
     setSelectedTransactionIds(nextIds);
-
-    // Calculate sum of selected payable transactions allocation totals
-    const selectedTxData = portalData.payableTransactions.filter((tx: any) => nextIds.includes(tx.id));
-    const sum = selectedTxData.reduce((acc: number, tx: any) => acc + tx.allocationTotal, 0);
-    setDeclaredAmount(sum);
+    // declaredAmount recomputes reactively — see the effect below.
   };
 
   const handleSelectPayAll = () => {
@@ -184,9 +201,19 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
     if (portalData) {
       const ids = portalData.payableTransactions.map((tx: any) => tx.id);
       setSelectedTransactionIds(ids);
-      setDeclaredAmount(portalData.totals.remaining);
     }
   };
+
+  // Keeps the selected total in sync with any free-input drafts as they're
+  // typed, not just when a checkbox is toggled — this is what makes "Select
+  // Individual Transactions" and "Amount Transferred" update live.
+  useEffect(() => {
+    if (!portalData) return;
+    const selectedTxData = portalData.payableTransactions.filter((tx: any) => selectedTransactionIds.includes(tx.id));
+    const sum = selectedTxData.reduce((acc: number, tx: any) => acc + getEffectiveAllocationTotal(tx), 0);
+    setDeclaredAmount(sum);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTransactionIds, freeInputDrafts, portalData]);
 
   const handleProofUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -292,7 +319,7 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
     );
   }
 
-  const { participant, category, totals: memberTotals, payableTransactions, activeSubmissions, declarationsNeeded, pendingDeclarations } = portalData;
+  const { participant, category, totals: memberTotals, payableTransactions, activeSubmissions } = portalData;
   const currentParticipantName = participant?.nickname || participant?.fullName || "Anda";
   const isFullyReimbursed = memberTotals.verifiedPaid >= memberTotals.totalOriginalObligation && memberTotals.totalOriginalObligation > 0;
 
@@ -388,67 +415,6 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
           )}
         </div>
 
-        {/* Free-input declarations — transactions with no fixed price/split
-            (e.g. no receipt) where this participant self-reports their share. */}
-        {((declarationsNeeded && declarationsNeeded.length > 0) || (pendingDeclarations && pendingDeclarations.length > 0)) && (
-          <div className="px-6 py-4 border-b border-slate-100 bg-amber-50/40 space-y-3">
-            <span className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider block">Perlu Input Kamu</span>
-
-            {(declarationsNeeded || []).map((d: any) => (
-              <div key={d.transactionId} className="p-3.5 bg-white border border-amber-200 rounded-xl space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <span className="font-bold text-sm text-slate-800 block">{d.title}</span>
-                    <span className="text-[10px] text-slate-400 font-mono">{d.categoryName} • {d.date ? new Date(d.date).toLocaleDateString("id-ID", { dateStyle: "medium" }) : "—"}</span>
-                  </div>
-                </div>
-
-                {d.status === "Rejected" && (
-                  <div className="p-2.5 bg-rose-50 border border-rose-150 rounded-lg text-[11px] text-rose-700">
-                    <span className="font-bold block mb-0.5">Deklarasi sebelumnya ditolak</span>
-                    Alasan: "{d.rejectionReason}". Silakan input ulang nominalnya.
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">IDR</span>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="Nominal tanggungan kamu"
-                      value={freeInputDrafts[d.transactionId] ?? ""}
-                      onChange={(e) => setFreeInputDrafts(prev => ({ ...prev, [d.transactionId]: e.target.value }))}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-3 py-2 font-mono font-bold text-xs focus:outline-none focus:border-indigo-600 focus:bg-white text-slate-800"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    disabled={submittingFreeInput === d.transactionId}
-                    onClick={() => handleSubmitFreeInput(d.transactionId)}
-                    className="shrink-0 px-4 py-2 bg-slate-950 hover:bg-slate-900 text-white font-semibold text-xs rounded-lg cursor-pointer disabled:opacity-50"
-                  >
-                    {submittingFreeInput === d.transactionId ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : (d.status === "Rejected" ? "Kirim Ulang" : "Kirim")}
-                  </button>
-                </div>
-              </div>
-            ))}
-
-            {(pendingDeclarations || []).map((d: any) => (
-              <div key={d.transactionId} className="p-3.5 bg-white border border-amber-150 rounded-xl flex items-center justify-between gap-2">
-                <div>
-                  <span className="font-bold text-sm text-slate-800 block">{d.title}</span>
-                  <span className="text-[10px] text-slate-400 font-mono">{d.categoryName}</span>
-                </div>
-                <div className="text-right">
-                  <span className="font-mono font-bold text-xs text-slate-700 block">{formatIDR(d.declaredAmount)}</span>
-                  <span className="text-[9px] text-amber-600 font-mono uppercase tracking-wider">Menunggu Review</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
         {/* Tabs for Active Billing and Payment History */}
         <div className="grid grid-cols-2 border-b border-slate-100 font-mono text-[10px] font-bold tracking-widest uppercase bg-slate-50/50">
           <button
@@ -506,7 +472,7 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                           {/* Right: Total per User & Toggle Button */}
                           <div className="flex items-center gap-3 shrink-0">
                             <span className="font-bold text-indigo-700 font-mono text-sm">
-                              {formatIDR(tx.allocationTotal)}
+                              {formatIDR(getEffectiveAllocationTotal(tx))}
                             </span>
                             <button
                               type="button"
@@ -564,6 +530,72 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                                   {tx.assignedItems.map((it: any, idx: number) => {
                                     const { namesString: itemNames, count: itemCount } = getItemParticipantInfo(it, currentParticipantName);
                                     const lineTotalCalc = it.lineTotal || (it.quantity * it.unitPrice);
+
+                                    if (it.isFreeInput) {
+                                      return (
+                                        <div key={it.id || idx} className="pb-2.5 border-b border-slate-100 last:border-b-0 last:pb-0">
+                                          <div className="flex justify-between items-start gap-2">
+                                            <div className="flex-1 min-w-0">
+                                              <div className="font-bold text-slate-800 text-xs sm:text-sm">
+                                                {it.name}
+                                              </div>
+                                              <div className="text-amber-600 font-mono text-[11px] font-normal mt-0.5">
+                                                Nominal ditentukan sendiri oleh peserta
+                                              </div>
+                                            </div>
+                                            {it.freeInputStatus === "Approved" && (
+                                              <div className="font-bold text-slate-800 font-mono text-xs sm:text-sm shrink-0 pt-0.5">
+                                                {formatIDR(it.allocatedAmount)}
+                                              </div>
+                                            )}
+                                          </div>
+
+                                          {it.freeInputStatus === "Pending" && (
+                                            <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px]">
+                                              <span className="text-amber-600 font-mono uppercase tracking-wider">Menunggu Review Admin</span>
+                                              <span className="font-bold text-slate-700 font-mono">{formatIDR(it.freeInputDeclaredAmount)}</span>
+                                            </div>
+                                          )}
+
+                                          {(it.freeInputStatus === "AwaitingInput" || it.freeInputStatus === "Rejected") && (
+                                            <div className="mt-1.5 space-y-1.5">
+                                              {it.freeInputStatus === "Rejected" && (
+                                                <div className="p-2 bg-rose-50 border border-rose-150 rounded-lg text-[10px] text-rose-700">
+                                                  <span className="font-bold block">Deklarasi sebelumnya ditolak</span>
+                                                  Alasan: "{it.freeInputRejectionReason}". Silakan isi ulang.
+                                                </div>
+                                              )}
+                                              <div className="flex items-center gap-2">
+                                                <div className="relative flex-1">
+                                                  <span className="absolute left-2.5 top-1.5 text-[10px] font-bold text-slate-400">IDR</span>
+                                                  <input
+                                                    type="number"
+                                                    min="0"
+                                                    placeholder="Nominal kamu"
+                                                    value={freeInputDrafts[it.freeInputAllocationId] ?? ""}
+                                                    onChange={(e) => setFreeInputDrafts(prev => ({ ...prev, [it.freeInputAllocationId]: e.target.value }))}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2 py-1.5 font-mono font-bold text-[11px] focus:outline-none focus:border-indigo-600 focus:bg-white text-slate-800"
+                                                  />
+                                                </div>
+                                                <button
+                                                  type="button"
+                                                  disabled={submittingFreeInput === it.freeInputAllocationId}
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleSubmitFreeInput(it.freeInputAllocationId);
+                                                  }}
+                                                  className="shrink-0 px-3 py-1.5 bg-slate-950 hover:bg-slate-900 text-white font-semibold text-[11px] rounded-lg cursor-pointer disabled:opacity-50"
+                                                >
+                                                  {submittingFreeInput === it.freeInputAllocationId ? <RefreshCw className="w-3 h-3 animate-spin" /> : (it.freeInputStatus === "Rejected" ? "Kirim Ulang" : "Kirim")}
+                                                </button>
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    }
+
                                     return (
                                       <div key={it.id || idx} className="pb-2.5 border-b border-slate-100 last:border-b-0 last:pb-0">
                                         <div className="flex justify-between items-start gap-2">
@@ -589,7 +621,7 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                                   <div className="border-t border-slate-200/80 pt-2.5 flex justify-between items-center text-[11px] sm:text-xs">
                                     <span className="text-slate-500 font-medium">Subtotal Jumlah Item:</span>
                                     <span className="font-bold text-slate-800 font-mono">
-                                      {formatIDR(tx.assignedItems.reduce((sum: number, it: any) => sum + (it.allocatedAmount || 0), 0))}
+                                      {formatIDR(tx.assignedItems.reduce((sum: number, it: any) => sum + getItemEffectiveAmount(it), 0))}
                                     </span>
                                   </div>
                                 </div>
@@ -607,7 +639,7 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                             {/* Final Allocation Subtotal inside the expanded card */}
                             <div className="pt-3 border-t border-slate-150 flex justify-between items-center">
                               <span className="text-xs font-bold text-slate-800">Alokasi Anda (Subtotal):</span>
-                              <span className="text-sm font-bold text-indigo-700 font-mono">{formatIDR(tx.allocationTotal)}</span>
+                              <span className="text-sm font-bold text-indigo-700 font-mono">{formatIDR(getEffectiveAllocationTotal(tx))}</span>
                             </div>
                           </div>
                         )}
@@ -645,7 +677,9 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                   {payAll ? <CheckSquare className="w-4 h-4 text-indigo-600" /> : <Square className="w-4 h-4 text-slate-400" />}
                   <span className="font-semibold text-slate-800">Pay All Outstanding Balance</span>
                 </div>
-                <span className="text-xs font-bold text-slate-950 font-mono">{formatIDR(memberTotals.remaining)}</span>
+                <span className="text-xs font-bold text-slate-950 font-mono">
+                  {formatIDR(payableTransactions.reduce((sum: number, tx: any) => sum + getEffectiveAllocationTotal(tx), 0))}
+                </span>
               </button>
 
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-150 space-y-2 text-xs text-slate-600">
@@ -655,15 +689,15 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                   return (
                     <label key={tx.id} className="flex items-center justify-between p-2 bg-white rounded border border-slate-100 cursor-pointer hover:bg-slate-50">
                       <div className="flex items-center gap-2">
-                        <input 
+                        <input
                           type="checkbox"
                           checked={isChecked}
-                          onChange={() => handleToggleTxSelection(tx.id, tx.allocationTotal)}
+                          onChange={() => handleToggleTxSelection(tx.id)}
                           className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                         />
                         <span className="font-medium truncate max-w-[180px]">{tx.title}</span>
                       </div>
-                      <span className="font-mono text-[11px] font-bold text-slate-700">{formatIDR(tx.allocationTotal)}</span>
+                      <span className="font-mono text-[11px] font-bold text-slate-700">{formatIDR(getEffectiveAllocationTotal(tx))}</span>
                     </label>
                   );
                 })}

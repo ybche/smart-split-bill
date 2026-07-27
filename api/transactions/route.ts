@@ -12,10 +12,9 @@ import { getSlug } from "../../lib/routeSlug.js";
 // function (Vercel Hobby caps a deployment at 12 functions) via an optional
 // catch-all segment:
 //   []                          -> GET / POST
-//   ["declarations"]            -> GET (global pending free-input declarations)
 //   [id]                        -> PUT / DELETE
 //   [id, "allocations"]         -> GET
-//   [id, "free-input", allocId] -> POST (approve/reject a declaration)
+//   [id, "free-input", allocId] -> POST (approve/reject a participant's item declaration)
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -24,9 +23,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (slug.length === 0) {
     if (req.method === "GET") {
-      const { data, error } = await supabaseAdmin.from("transactions").select("*").order("created_at", { ascending: false });
+      const [{ data, error }, { data: pendingAllocs }] = await Promise.all([
+        supabaseAdmin.from("transactions").select("*").order("created_at", { ascending: false }),
+        supabaseAdmin.from("allocations").select("transaction_id").eq("method", "FreeInput").eq("status", "Pending"),
+      ]);
       if (error) return res.status(500).json({ error: error.message });
-      return res.json(toCamelCase(data));
+
+      // Lets the Transactions list surface which rows have a participant
+      // declaration awaiting review, without a separate admin page.
+      const pendingCountByTx = new Map<string, number>();
+      (pendingAllocs ?? []).forEach((a: any) => {
+        pendingCountByTx.set(a.transaction_id, (pendingCountByTx.get(a.transaction_id) || 0) + 1);
+      });
+
+      const enriched = (data ?? []).map((t: any) => ({
+        ...toCamelCase(t),
+        pendingFreeInputCount: pendingCountByTx.get(t.id) || 0,
+      }));
+      return res.json(enriched);
     }
 
     if (req.method === "POST") {
@@ -35,7 +49,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           categoryId, title, merchant, date, payerId,
           subtotal, tax, serviceCharge, discount, otherFees, total,
           expenseClassification, items, description, notes, status, inputMethod,
-          freeInputParticipantIds,
         } = req.body ?? {};
 
         if (!categoryId || !title || !payerId || subtotal === undefined || total === undefined) {
@@ -81,30 +94,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const transactionId = newTransaction.id;
         const safeItems = Array.isArray(items) ? items : [];
 
-        const itemRows = safeItems.map((it: any, index: number) => ({
-          transaction_id: transactionId,
-          name: it.name || `Item #${index + 1}`,
-          quantity: Number(it.quantity || 1),
-          unit_price: Number(it.unitPrice || it.lineTotal || 0),
-          line_total: Number(it.lineTotal || 0),
-          classification: it.classification || expenseClassification || "Other",
-          sort_order: index,
-        }));
+        // Items carry a client-generated id (crypto.randomUUID()) even when
+        // brand new, so it doubles as the real primary key here — this lets
+        // free-input allocations reference a stable item_id from creation.
+        const insertedItems = await upsertTransactionItems(transactionId, safeItems, expenseClassification);
+        const insertedById = new Map(insertedItems.map((row: any) => [row.id, row]));
 
-        let insertedItems: any[] = [];
-        if (itemRows.length > 0) {
-          const { data, error } = await supabaseAdmin.from("transaction_items").insert(itemRows).select();
-          if (error) return res.status(500).json({ error: error.message });
-          insertedItems = data;
-        }
-
-        const engineItems = insertedItems.map((row, index) => ({
-          id: row.id,
-          price: row.unit_price,
-          quantity: row.quantity,
-          splitMethod: safeItems[index]?.splitMethod || "Equal",
-          itemAllocations: Array.isArray(safeItems[index]?.itemAllocations) ? safeItems[index].itemAllocations : [],
-        }));
+        const fixedItems = safeItems.filter((it: any) => it.splitMethod !== "FreeInput");
+        const engineItems = fixedItems
+          .map((it: any) => {
+            const row = insertedById.get(it.id);
+            if (!row) return null;
+            return {
+              id: row.id,
+              price: row.unit_price,
+              quantity: row.quantity,
+              splitMethod: it.splitMethod || "Equal",
+              itemAllocations: Array.isArray(it.itemAllocations) ? it.itemAllocations : [],
+            };
+          })
+          .filter(Boolean) as any[];
 
         const calcResult = calculateSplits(numSubtotal, numTax, numServiceCharge, numDiscount, numOtherFees, engineItems);
 
@@ -138,9 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (error) return res.status(500).json({ error: error.message });
         }
 
-        if (Array.isArray(freeInputParticipantIds) && freeInputParticipantIds.length > 0) {
-          await createAwaitingInputRows(transactionId, freeInputParticipantIds);
-        }
+        await reconcileFreeInputItems(transactionId, safeItems, insertedById);
 
         await syncCategoryParticipants(categoryId);
         await logActivity(admin.id, "transaction", transactionId, "created", "admin", { title, total: numTotal });
@@ -154,29 +161,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Metode tidak diizinkan" });
   }
 
-  if (slug.length === 1 && slug[0] === "declarations") {
-    if (req.method !== "GET") return res.status(405).json({ error: "Metode tidak diizinkan" });
-
-    const { data, error } = await supabaseAdmin
-      .from("allocations")
-      .select("id, transaction_id, rounded_amount, participants(full_name, nickname), transactions(title, date, categories(name))")
-      .eq("method", "FreeInput")
-      .eq("status", "Pending");
-    if (error) return res.status(500).json({ error: error.message });
-
-    const declarations = (data ?? []).map((row: any) => ({
-      id: row.id,
-      transactionId: row.transaction_id,
-      participantName: row.participants?.nickname || row.participants?.full_name || "Unknown",
-      transactionTitle: row.transactions?.title || "Unknown",
-      transactionDate: row.transactions?.date,
-      categoryName: row.transactions?.categories?.name || "Unknown",
-      declaredAmount: row.rounded_amount,
-    }));
-
-    return res.json(declarations);
-  }
-
   const id = slug[0];
 
   if (slug.length === 1) {
@@ -186,7 +170,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           title, merchant, date, payerId,
           subtotal, tax, serviceCharge, discount, otherFees, total,
           expenseClassification, items, description, notes, status,
-          freeInputParticipantIds,
         } = req.body ?? {};
 
         const { data: existing, error: fetchError } = await supabaseAdmin
@@ -227,38 +210,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .single();
         if (updateError) return res.status(500).json({ error: updateError.message });
 
-        // Full replace of items + split-engine allocations for this
-        // transaction. FreeInput rows are excluded — a participant's
-        // declaration (awaiting, pending, approved, or rejected) must survive
-        // the admin editing unrelated parts of the transaction.
-        await supabaseAdmin.from("allocations").delete().eq("transaction_id", id).neq("method", "FreeInput");
-        await supabaseAdmin.from("transaction_items").delete().eq("transaction_id", id);
-
         const safeItems = Array.isArray(items) ? items : [];
-        const itemRows = safeItems.map((it: any, index: number) => ({
-          transaction_id: id,
-          name: it.name || `Item #${index + 1}`,
-          quantity: Number(it.quantity || 1),
-          unit_price: Number(it.unitPrice || it.lineTotal || 0),
-          line_total: Number(it.lineTotal || 0),
-          classification: it.classification || expenseClassification || "Other",
-          sort_order: index,
-        }));
 
-        let insertedItems: any[] = [];
-        if (itemRows.length > 0) {
-          const { data, error } = await supabaseAdmin.from("transaction_items").insert(itemRows).select();
-          if (error) return res.status(500).json({ error: error.message });
-          insertedItems = data;
+        // Items are upserted by id (not wholesale deleted+reinserted): an item
+        // the admin didn't touch keeps its real id, so any free-input
+        // declaration tied to it (via allocations.item_id, which cascades on
+        // delete) survives editing unrelated parts of the transaction. Items
+        // genuinely removed from the form are deleted, which correctly also
+        // drops any declarations that belonged only to them.
+        const { data: existingItemRows } = await supabaseAdmin.from("transaction_items").select("id").eq("transaction_id", id);
+        const existingItemIds = new Set((existingItemRows ?? []).map((r: any) => r.id));
+        const incomingIds = new Set(safeItems.map((it: any) => it.id));
+        const idsToDelete = Array.from(existingItemIds).filter((itemId) => !incomingIds.has(itemId));
+        if (idsToDelete.length > 0) {
+          await supabaseAdmin.from("transaction_items").delete().in("id", idsToDelete);
         }
 
-        const engineItems = insertedItems.map((row, index) => ({
-          id: row.id,
-          price: row.unit_price,
-          quantity: row.quantity,
-          splitMethod: safeItems[index]?.splitMethod || "Equal",
-          itemAllocations: Array.isArray(safeItems[index]?.itemAllocations) ? safeItems[index].itemAllocations : [],
-        }));
+        // Split-engine allocations are always fully recomputed below.
+        // FreeInput rows are never touched here regardless of status.
+        await supabaseAdmin.from("allocations").delete().eq("transaction_id", id).neq("method", "FreeInput");
+
+        const insertedItems = await upsertTransactionItems(id, safeItems, expenseClassification);
+        const insertedById = new Map(insertedItems.map((row: any) => [row.id, row]));
+
+        const fixedItems = safeItems.filter((it: any) => it.splitMethod !== "FreeInput");
+        const engineItems = fixedItems
+          .map((it: any) => {
+            const row = insertedById.get(it.id);
+            if (!row) return null;
+            return {
+              id: row.id,
+              price: row.unit_price,
+              quantity: row.quantity,
+              splitMethod: it.splitMethod || "Equal",
+              itemAllocations: Array.isArray(it.itemAllocations) ? it.itemAllocations : [],
+            };
+          })
+          .filter(Boolean) as any[];
 
         const calcResult = calculateSplits(numSubtotal, numTax, numServiceCharge, numDiscount, numOtherFees, engineItems);
 
@@ -292,21 +280,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (error) return res.status(500).json({ error: error.message });
         }
 
-        const freeInputIds = Array.isArray(freeInputParticipantIds) ? freeInputParticipantIds : [];
-        if (freeInputIds.length > 0) {
-          await createAwaitingInputRows(id, freeInputIds);
-        }
-        // A participant removed from the free-input list only has their row
-        // dropped if it's still untouched (AwaitingInput) — once they've
-        // declared something (Pending/Approved/Rejected) it must not vanish
-        // just because admin unchecked them here.
-        await supabaseAdmin
-          .from("allocations")
-          .delete()
-          .eq("transaction_id", id)
-          .eq("method", "FreeInput")
-          .eq("status", "AwaitingInput")
-          .not("participant_id", "in", `(${(freeInputIds.length ? freeInputIds : ["00000000-0000-0000-0000-000000000000"]).join(",")})`);
+        await reconcileFreeInputItems(id, safeItems, insertedById);
 
         await syncCategoryParticipants(existing.category_id);
         await logActivity(admin.id, "transaction", id, "updated", "admin", { title: updated.title, total: updated.total });
@@ -376,17 +350,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (allocError) return res.status(500).json({ error: allocError.message });
 
     // The edit form (Transactions.tsx) reconstructs each item's checked
-    // participants from item.allocations, so allocations must be nested per
-    // item, not returned as a separate flat array.
+    // participants (and any free-input declarations) from item.allocations,
+    // so allocations must be nested per item, not returned as a flat array.
     const itemsWithAllocations = (items ?? []).map((item: any) => ({
       ...toCamelCase(item),
       allocations: toCamelCase((allocations ?? []).filter((al: any) => al.item_id === item.id)),
     }));
 
-    const chargeAllocations = toCamelCase((allocations ?? []).filter((al: any) => !al.item_id && al.method !== "FreeInput"));
-    const freeInputAllocations = toCamelCase((allocations ?? []).filter((al: any) => al.method === "FreeInput"));
+    const chargeAllocations = toCamelCase((allocations ?? []).filter((al: any) => !al.item_id));
 
-    return res.json({ items: itemsWithAllocations, allocations: chargeAllocations, freeInputAllocations });
+    return res.json({ items: itemsWithAllocations, allocations: chargeAllocations });
   }
 
   if (slug.length === 3 && slug[1] === "free-input") {
@@ -414,4 +387,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   res.status(404).json({ error: "Rute tidak ditemukan." });
+}
+
+// Inserts new items / updates existing ones in place (matched by the
+// client-generated id every item already carries), so item ids stay stable
+// across edits — required for free-input allocations to survive them.
+async function upsertTransactionItems(transactionId: string, safeItems: any[], expenseClassification: string): Promise<any[]> {
+  if (safeItems.length === 0) return [];
+
+  const itemRows = safeItems.map((it: any, index: number) => ({
+    id: it.id,
+    transaction_id: transactionId,
+    name: it.name || `Item #${index + 1}`,
+    quantity: Number(it.quantity || 1),
+    unit_price: it.splitMethod === "FreeInput" ? 0 : Number(it.unitPrice || it.lineTotal || 0),
+    line_total: it.splitMethod === "FreeInput" ? 0 : Number(it.lineTotal || 0),
+    classification: it.classification || expenseClassification || "Other",
+    sort_order: index,
+  }));
+
+  const { data, error } = await supabaseAdmin.from("transaction_items").upsert(itemRows, { onConflict: "id" }).select();
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+// For each item marked "FreeInput", makes sure exactly the currently-checked
+// participants have an allocation row for it: creates AwaitingInput rows for
+// newly-added participants, and drops rows for removed ones -- but only if
+// still untouched (AwaitingInput). A participant who already declared
+// (Pending/Approved/Rejected) never has their row silently removed here.
+async function reconcileFreeInputItems(transactionId: string, safeItems: any[], insertedById: Map<string, any>): Promise<void> {
+  const freeInputItems = safeItems.filter((it: any) => it.splitMethod === "FreeInput");
+
+  for (const it of freeInputItems) {
+    const row = insertedById.get(it.id);
+    if (!row) continue;
+
+    const participantIds = (Array.isArray(it.itemAllocations) ? it.itemAllocations : [])
+      .filter((al: any) => al.weight > 0)
+      .map((al: any) => al.participantId);
+
+    await createAwaitingInputRows(transactionId, row.id, participantIds);
+
+    await supabaseAdmin
+      .from("allocations")
+      .delete()
+      .eq("transaction_id", transactionId)
+      .eq("item_id", row.id)
+      .eq("method", "FreeInput")
+      .eq("status", "AwaitingInput")
+      .not("participant_id", "in", `(${(participantIds.length ? participantIds : ["00000000-0000-0000-0000-000000000000"]).join(",")})`);
+  }
 }

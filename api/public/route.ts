@@ -319,8 +319,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (slug.length === 3 && slug[2] === "free-input") {
       if (req.method !== "POST") return res.status(405).json({ error: "Metode tidak diizinkan" });
 
-      const { transactionId, amount } = req.body ?? {};
-      if (!transactionId || amount === undefined || Number(amount) < 0) {
+      const { allocationId, amount } = req.body ?? {};
+      if (!allocationId || amount === undefined || Number(amount) < 0) {
         return res.status(400).json({ error: "Nominal deklarasi tidak valid." });
       }
 
@@ -335,15 +335,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(403).json({ error: "Token tidak valid atau tautan tidak aktif." });
       }
 
+      // Scoped to this specific item's allocation row, and to the token's
+      // own participant — a participant can only ever act on their own
+      // declaration, never someone else's, even if they guess an id.
       const { data: alloc, error: allocError } = await supabaseAdmin
         .from("allocations")
         .select("*")
-        .eq("transaction_id", transactionId)
+        .eq("id", allocationId)
         .eq("participant_id", cp.participant_id)
         .eq("method", "FreeInput")
         .maybeSingle();
       if (allocError) return res.status(500).json({ error: allocError.message });
-      if (!alloc) return res.status(404).json({ error: "Deklarasi untuk transaksi ini tidak ditemukan." });
+      if (!alloc) return res.status(404).json({ error: "Deklarasi untuk item ini tidak ditemukan." });
       // Only an untouched or previously-rejected declaration can be
       // (re)submitted — one already Pending or Approved must go through the
       // admin review flow instead of being silently overwritten here.
@@ -358,8 +361,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq("id", alloc.id);
       if (updateError) return res.status(500).json({ error: updateError.message });
 
-      await logActivity(null, "transaction", transactionId, "free_input_declared", "participant", {
+      await logActivity(null, "transaction", alloc.transaction_id, "free_input_declared", "participant", {
         participantId: cp.participant_id,
+        itemId: alloc.item_id,
         amount: roundedAmount,
       });
 
