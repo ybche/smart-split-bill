@@ -268,6 +268,26 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
 
   const handleSubmitDeclaration = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Every free-input item on a transaction being paid must have been
+    // explicitly declared first — a participant can't silently skip one and
+    // have it just not count. If they genuinely didn't have any of that
+    // item, they still have to declare 0.
+    for (const txId of selectedTransactionIds) {
+      const tx = payableTransactions.find((t: any) => t.id === txId);
+      if (!tx) continue;
+      const unresolvedItem = (tx.assignedItems || []).find((it: any) =>
+        it.isFreeInput && (it.freeInputStatus === "AwaitingInput" || it.freeInputStatus === "Rejected")
+      );
+      if (unresolvedItem) {
+        onShowNotification(
+          `Pada transaksi "${tx.title}", item "${unresolvedItem.name}" perlu diisi nominalnya dulu. Kalau memang tidak ada, isi dengan 0.`,
+          "error"
+        );
+        return;
+      }
+    }
+
     if (declaredAmount <= 0) {
       onShowNotification("Jumlah yang ditransfer harus diisi dan lebih besar dari nol.", "error");
       return;
