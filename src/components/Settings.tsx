@@ -21,6 +21,7 @@ export default function Settings({ token, admin, onShowNotification }: SettingsP
   // Message templates state
   const [introTemplate, setIntroTemplate] = useState("");
   const [reminderTemplate, setReminderTemplate] = useState("");
+  const [requireProof, setRequireProof] = useState(true);
   const [savingTemplates, setSavingTemplates] = useState(false);
 
   // Admins list state
@@ -40,6 +41,7 @@ export default function Settings({ token, admin, onShowNotification }: SettingsP
     if (admin && admin.settings) {
       setIntroTemplate(admin.settings.introductionTemplate || "");
       setReminderTemplate(admin.settings.reminderTemplate || "");
+      setRequireProof(admin.settings.requireProof ?? true);
     }
   }, [admin]);
 
@@ -81,7 +83,8 @@ export default function Settings({ token, admin, onShowNotification }: SettingsP
         body: JSON.stringify({
           settings: {
             introductionTemplate: introTemplate,
-            reminderTemplate: reminderTemplate
+            reminderTemplate: reminderTemplate,
+            requireProof
           }
         })
       });
@@ -299,6 +302,33 @@ export default function Settings({ token, admin, onShowNotification }: SettingsP
             </div>
           </div>
 
+          {/* Portal Peserta General Settings */}
+          <div className="bg-[#121214]/40 border border-white/5 p-6 flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-bold text-white font-mono">Wajib Lampirkan Bukti Transfer</h3>
+              <p className="text-xs text-[#F9F9F7]/50 leading-relaxed mt-1">
+                Jika aktif, peserta wajib mengunggah foto bukti transfer sebelum bisa mengirim deklarasi pembayaran di Portal Peserta.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRequireProof(!requireProof)}
+              className="flex items-center text-white/80 hover:text-white cursor-pointer shrink-0"
+            >
+              {requireProof ? (
+                <div className="flex items-center gap-2 text-emerald-400">
+                  <ToggleRight className="w-8 h-8" />
+                  <span className="text-[10px] font-mono uppercase tracking-wider font-bold">Wajib</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-white/40">
+                  <ToggleLeft className="w-8 h-8" />
+                  <span className="text-[10px] font-mono uppercase tracking-wider font-bold">Opsional</span>
+                </div>
+              )}
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             {/* Introduction Message */}
             <div className="space-y-4">
@@ -347,7 +377,7 @@ export default function Settings({ token, admin, onShowNotification }: SettingsP
               disabled={savingTemplates}
               className="flex items-center gap-2 bg-white text-black hover:bg-neutral-200 font-mono font-bold uppercase tracking-widest text-[10px] px-6 py-3.5 transition-colors cursor-pointer"
             >
-              {savingTemplates ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Save Templates Configuration"}
+              {savingTemplates ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Save Settings & Templates"}
             </button>
           </div>
         </form>
