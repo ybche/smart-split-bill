@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { 
   CheckCircle, Clock, AlertTriangle, XCircle, Copy, Check, QrCode, 
   FileUp, RefreshCw, Send, AlertCircle, Sparkles, LogIn, Landmark, 
-  CreditCard, Smartphone, CheckSquare, Square, Info, X, ChevronDown, ChevronUp
+  CreditCard, Smartphone, CheckSquare, Square, Info, X, ChevronDown, ChevronUp, Pencil
 } from "lucide-react";
 import { PaymentMethod } from "../types";
 
@@ -72,6 +72,17 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
   // the declaration is submitted or approved.
   const [freeInputDrafts, setFreeInputDrafts] = useState<Record<string, string>>({});
   const [submittingFreeInput, setSubmittingFreeInput] = useState<string | null>(null);
+  // A rejected free-input item shows its old value locked by default; the
+  // participant has to explicitly click the edit trigger to unlock it for a
+  // resubmission, rather than being dropped straight into an editable field.
+  const [freeInputEditing, setFreeInputEditing] = useState<Record<string, boolean>>({});
+
+  const toggleFreeInputEdit = (allocationId: string, prefill?: number) => {
+    setFreeInputEditing(prev => ({ ...prev, [allocationId]: !prev[allocationId] }));
+    setFreeInputDrafts(prev => (
+      prev[allocationId] !== undefined ? prev : { ...prev, [allocationId]: prefill !== undefined ? String(prefill) : "" }
+    ));
+  };
 
   const toggleExpandTx = (id: string) => {
     setExpandedTxIds(prev => 
@@ -186,6 +197,11 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
       if (res.ok) {
         onShowNotification("Nominal berhasil ditambahkan ke tagihan kamu.", "success");
         setFreeInputDrafts(prev => {
+          const next = { ...prev };
+          delete next[allocationId];
+          return next;
+        });
+        setFreeInputEditing(prev => {
           const next = { ...prev };
           delete next[allocationId];
           return next;
@@ -589,6 +605,7 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                                     const lineTotalCalc = it.lineTotal || (it.quantity * it.unitPrice);
 
                                     if (it.isFreeInput) {
+                                      const isEditingRejected = it.freeInputStatus === "Rejected" && !!freeInputEditing[it.freeInputAllocationId];
                                       return (
                                         <div key={it.id || idx} className="pb-2.5 border-b border-slate-100 last:border-b-0 last:pb-0">
                                           <div className="flex justify-between items-start gap-2">
@@ -605,16 +622,28 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                                                 {formatIDR(it.allocatedAmount)}
                                               </div>
                                             )}
+                                            {it.freeInputStatus === "Rejected" && !isEditingRejected && (
+                                              <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+                                                <span className="font-bold text-rose-500 font-mono text-xs sm:text-sm">
+                                                  {formatIDR(it.freeInputDeclaredAmount || 0)}
+                                                </span>
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    toggleFreeInputEdit(it.freeInputAllocationId, it.freeInputDeclaredAmount);
+                                                  }}
+                                                  title="Ditolak admin — klik untuk mengisi ulang"
+                                                  className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-md cursor-pointer"
+                                                >
+                                                  <Pencil className="w-3 h-3" />
+                                                </button>
+                                              </div>
+                                            )}
                                           </div>
 
-                                          {(it.freeInputStatus === "AwaitingInput" || it.freeInputStatus === "Rejected") && (
+                                          {(it.freeInputStatus === "AwaitingInput" || isEditingRejected) && (
                                             <div className="mt-1.5 space-y-1.5">
-                                              {it.freeInputStatus === "Rejected" && (
-                                                <div className="p-2 bg-rose-50 border border-rose-150 rounded-lg text-[10px] text-rose-700">
-                                                  <span className="font-bold block">Deklarasi sebelumnya ditolak</span>
-                                                  Alasan: "{it.freeInputRejectionReason}". Silakan isi ulang.
-                                                </div>
-                                              )}
                                               <div className="flex items-center gap-2">
                                                 <div className="relative flex-1">
                                                   <span className="absolute left-2.5 top-1.5 text-[10px] font-bold text-slate-400">IDR</span>
