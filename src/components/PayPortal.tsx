@@ -220,13 +220,20 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
   };
 
   // A free-input item's "amount" is either the confirmed one (once
-  // declared — there's no separate approval step) or whatever's currently
-  // typed but not yet submitted.
+  // declared — there's no separate approval step), whatever's currently
+  // typed but not yet submitted, or — for a rejected item the participant
+  // hasn't opened the editor for yet — the old declared amount, which still
+  // counts toward the subtotal/transfer total until they actually change it.
   const getItemEffectiveAmount = (it: any): number => {
     if (!it.isFreeInput) return it.allocatedAmount || 0;
     if (it.freeInputStatus === "Approved") return it.allocatedAmount || 0;
-    const draft = Number(freeInputDrafts[it.freeInputAllocationId]);
-    return isNaN(draft) ? 0 : draft;
+    const draftRaw = freeInputDrafts[it.freeInputAllocationId];
+    if (draftRaw !== undefined) {
+      const draft = Number(draftRaw);
+      return isNaN(draft) ? 0 : draft;
+    }
+    if (it.freeInputStatus === "Rejected") return it.freeInputDeclaredAmount || 0;
+    return 0;
   };
 
   // A transaction's true "amount you owe" — fixed items plus free-input items
@@ -624,7 +631,7 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                                             )}
                                             {it.freeInputStatus === "Rejected" && !isEditingRejected && (
                                               <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
-                                                <span className="font-bold text-rose-500 font-mono text-xs sm:text-sm">
+                                                <span className="font-bold text-slate-800 font-mono text-xs sm:text-sm">
                                                   {formatIDR(it.freeInputDeclaredAmount || 0)}
                                                 </span>
                                                 <button
@@ -633,8 +640,8 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                                                     e.stopPropagation();
                                                     toggleFreeInputEdit(it.freeInputAllocationId, it.freeInputDeclaredAmount);
                                                   }}
-                                                  title="Ditolak admin — klik untuk mengisi ulang"
-                                                  className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-md cursor-pointer"
+                                                  title="Klik untuk mengisi ulang nominal"
+                                                  className="p-1 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-md cursor-pointer"
                                                 >
                                                   <Pencil className="w-3 h-3" />
                                                 </button>
