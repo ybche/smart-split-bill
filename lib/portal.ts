@@ -139,7 +139,10 @@ export async function getPortalData(token: string) {
       totalOriginalObligation += obligationAmount;
 
       const hasPendingOrPaid = paymentsForTx.some((p: any) => p.status === "Paid" || p.status === "Pending Verification");
-      if (hasPendingOrPaid || (remainingAmount <= 0 && !hasUnresolvedFreeInput)) continue;
+      // A transaction otherwise settled/in-progress still needs to stay
+      // visible if one of its free-input items got reopened (rejected) —
+      // otherwise the participant can never see the item to redeclare it.
+      if (!hasUnresolvedFreeInput && (hasPendingOrPaid || remainingAmount <= 0)) continue;
 
       const txItems = itemsByTx.get(t.id) || [];
 
