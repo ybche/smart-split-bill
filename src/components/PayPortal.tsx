@@ -401,7 +401,19 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
 
   const { participant, category, totals: memberTotals, payableTransactions, activeSubmissions } = portalData;
   const currentParticipantName = participant?.nickname || participant?.fullName || "Anda";
-  const isFullyReimbursed = memberTotals.verifiedPaid >= memberTotals.totalOriginalObligation && memberTotals.totalOriginalObligation > 0;
+  // payableTransactions can still hold a transaction purely because it has an
+  // unresolved (rejected) free-input item to redeclare, even once
+  // verifiedPaid has caught up with the server's (necessarily smaller,
+  // Approved-only) totalOriginalObligation -- guard against declaring
+  // "fully reimbursed" while one of those is still sitting there unresolved.
+  const isFullyReimbursed = memberTotals.verifiedPaid >= memberTotals.totalOriginalObligation && memberTotals.totalOriginalObligation > 0 && payableTransactions.length === 0;
+
+  // The server's memberTotals.remaining only counts Approved allocations, so
+  // a rejected free-input item's old (still-owed) amount drops out of it the
+  // moment it's rejected -- live-recompute from the same effective-amount
+  // logic the itemized cards and "Pay All" button already use, so every
+  // total on this page agrees with what the participant sees per item.
+  const effectiveRemainingTotal = payableTransactions.reduce((sum: number, tx: any) => sum + getEffectiveAllocationTotal(tx), 0);
 
   // Find currently selected method object
   const selectedMethod = paymentMethods.find(m => m.id === selectedMethodId);
@@ -463,7 +475,7 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
               <div>
                 <span className="font-bold text-sm block">Payments Due</span>
                 <span className="text-xs text-rose-700 block mt-0.5">
-                  You have an outstanding balance of <span className="font-bold text-rose-900">{formatIDR(memberTotals.remaining)}</span>. Please complete transfers.
+                  You have an outstanding balance of <span className="font-bold text-rose-900">{formatIDR(effectiveRemainingTotal)}</span>. Please complete transfers.
                 </span>
               </div>
             </div>
@@ -738,7 +750,7 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                 <div className="mt-6 pt-5 border-t border-slate-200 text-xs text-slate-500">
                   <div className="flex justify-between text-sm text-slate-800 font-bold pt-1">
                     <span>Total Due Balance:</span>
-                    <span className="font-mono text-base text-indigo-700">{formatIDR(memberTotals.remaining)}</span>
+                    <span className="font-mono text-base text-indigo-700">{formatIDR(effectiveRemainingTotal)}</span>
                   </div>
                 </div>
               </div>
