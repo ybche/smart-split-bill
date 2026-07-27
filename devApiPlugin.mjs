@@ -9,12 +9,14 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API_DIR = path.join(__dirname, "api");
 
-// Groups consolidated behind a single api/<group>/_handler.ts file (see
+// Groups consolidated behind a single api/<group>/route.ts file (see
 // vercel.json's rewrites and lib/routeSlug.ts). Every request under one of
 // these is routed straight to that file, with everything after the group
 // name passed through as the "slug" query param — mirroring how Vercel's
 // rewrites pass it in production, since a real bracket-based catch-all file
-// only ever matched a single path segment deep on that platform.
+// only ever matched a single path segment deep on that platform. (A leading
+// underscore, e.g. "_handler.ts", was tried first but Vercel silently
+// excludes underscore-prefixed files from deployed functions entirely.)
 const HANDLER_GROUPS = [
   "categories",
   "transactions",
@@ -29,7 +31,7 @@ const HANDLER_GROUPS = [
 
 function resolveApiFile(segments) {
   if (segments.length >= 1 && HANDLER_GROUPS.includes(segments[0])) {
-    const handlerFile = path.join(API_DIR, segments[0], "_handler.ts");
+    const handlerFile = path.join(API_DIR, segments[0], "route.ts");
     if (fs.existsSync(handlerFile)) {
       return { file: handlerFile, params: { slug: segments.slice(1) } };
     }
