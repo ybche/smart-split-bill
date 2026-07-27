@@ -419,16 +419,16 @@ export default function App() {
           ) : (
             <div className="p-6 space-y-4">
               <div className="p-3 bg-white/[0.03] border border-white/10 rounded-md text-xs text-white/70">
-                <p className="font-sans text-xs">Akses portal pembayaran pribadi Anda dengan memasukkan Nama, Nomor HP, atau Token Personal Anda.</p>
+                <p className="font-sans text-xs">Akses portal pembayaran pribadi Anda dengan memasukkan Nomor HP atau Token Personal Anda.</p>
               </div>
 
               <form onSubmit={handleSearchPortal} className="space-y-4">
                 <div>
-                  <label className="block text-[10px] font-mono font-bold uppercase tracking-widest text-[#F9F9F7]/50 mb-1.5">Nama / Nomor HP / Personal Token</label>
-                  <input 
+                  <label className="block text-[10px] font-mono font-bold uppercase tracking-widest text-[#F9F9F7]/50 mb-1.5">Nomor HP / Personal Token</label>
+                  <input
                     type="text"
                     required
-                    placeholder="Contoh: Yeb atau 08123456789"
+                    placeholder="Contoh: 08123456789"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full bg-white/[0.03] border border-white/10 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:bg-white/[0.06] text-[#F9F9F7] font-sans transition-colors placeholder:opacity-30"
