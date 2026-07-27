@@ -100,13 +100,8 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
         if (resMethods.ok) {
           const methods = await resMethods.json();
           setPaymentMethods(methods);
-          // Set preferred method as initial
-          const preferred = methods.find((m: any) => m.isPreferred);
-          if (preferred) {
-            setSelectedMethodId(preferred.id);
-          } else if (methods.length > 0) {
-            setSelectedMethodId(methods[0].id);
-          }
+          // Left unselected on purpose — the participant must actively pick
+          // their transfer method rather than have one pre-chosen for them.
         }
       } else {
         onShowNotification("Token tautan pembayaran personal tidak valid atau telah dicabut.", "error");
@@ -177,7 +172,7 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
       return;
     }
     if (!selectedMethodId) {
-      onShowNotification("Please select your destination transfer method.", "error");
+      onShowNotification("Metode pembayaran belum dipilih. Silakan pilih salah satu metode transfer di atas.", "error");
       return;
     }
 
