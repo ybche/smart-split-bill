@@ -25,17 +25,16 @@ interface FormItem {
   freeInputDeclarations?: Record<string, { allocationId: string; status: string; amount: number; rejectionReason?: string }>;
 }
 
-function FreeInputDeclarationBadge({ declaration, formatIDR, onApprove, onReject }: {
+// The participant's declared amount counts immediately once submitted — no
+// admin approval gates it. Admin only has an optional override: reject,
+// which reopens the item for the participant to redeclare.
+function FreeInputDeclarationBadge({ declaration, formatIDR, onReject }: {
   declaration: { status: string; amount: number; rejectionReason?: string };
   formatIDR: (val: number) => string;
-  onApprove: () => void;
   onReject: () => void;
 }) {
   if (declaration.status === "AwaitingInput") {
     return <span className="text-[10px] text-[#F9F9F7]/30 italic">Belum diisi peserta</span>;
-  }
-  if (declaration.status === "Approved") {
-    return <span className="text-[10px] text-emerald-400 font-bold">{formatIDR(declaration.amount)} (Approved)</span>;
   }
   if (declaration.status === "Rejected") {
     return (
@@ -44,23 +43,16 @@ function FreeInputDeclarationBadge({ declaration, formatIDR, onApprove, onReject
       </span>
     );
   }
-  // Pending — awaiting admin review.
+  // Approved (the only other reachable state) — active immediately, admin
+  // can still reopen it if something looks wrong.
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[10px] text-amber-400 font-bold">{formatIDR(declaration.amount)}</span>
-      <button
-        type="button"
-        onClick={onApprove}
-        className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 p-1 transition-all cursor-pointer"
-        title="Setujui deklarasi"
-      >
-        <CheckCircle className="w-3 h-3" />
-      </button>
+      <span className="text-[10px] text-emerald-400 font-bold">{formatIDR(declaration.amount)}</span>
       <button
         type="button"
         onClick={onReject}
         className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 p-1 transition-all cursor-pointer"
-        title="Tolak deklarasi"
+        title="Buka kembali (peserta perlu isi ulang)"
       >
         <X className="w-3 h-3" />
       </button>
@@ -279,41 +271,22 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
     setShowModal(true);
   };
 
-  const handleApproveFreeInput = async (allocationId: string) => {
-    if (!editingId) return;
-    try {
-      const res = await fetch(`/api/transactions/${editingId}/free-input/${allocationId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ action: "approve" })
-      });
-      if (res.ok) {
-        onShowNotification("Deklarasi peserta disetujui.", "success");
-        await loadFormItemsFromAllocations(editingId);
-        fetchTransactionsData();
-      } else {
-        const err = await res.json();
-        onShowNotification(err.error || "Gagal menyetujui deklarasi.", "error");
-      }
-    } catch (err) {
-      console.error(err);
-      onShowNotification("Terjadi kesalahan jaringan.", "error");
-    }
-  };
-
+  // Declared amounts count immediately with no approval step — this is the
+  // only admin action on a free-input item: reopen it for the participant
+  // to redo, e.g. because the typed amount looks wrong.
   const handleRejectFreeInput = async (allocationId: string) => {
     if (!editingId) return;
-    const reason = window.prompt("Alasan penolakan deklarasi ini:");
+    const reason = window.prompt("Alasan membuka kembali deklarasi ini (peserta akan diminta isi ulang):");
     if (!reason) return;
 
     try {
       const res = await fetch(`/api/transactions/${editingId}/free-input/${allocationId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ action: "reject", rejectionReason: reason })
+        body: JSON.stringify({ rejectionReason: reason })
       });
       if (res.ok) {
-        onShowNotification("Deklarasi peserta ditolak.", "success");
+        onShowNotification("Deklarasi dibuka kembali — peserta akan bisa isi ulang.", "success");
         await loadFormItemsFromAllocations(editingId);
         fetchTransactionsData();
       } else {
@@ -1623,7 +1596,6 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
                                     <FreeInputDeclarationBadge
                                       declaration={item.freeInputDeclarations[cp.id]}
                                       formatIDR={formatIDR}
-                                      onApprove={() => handleApproveFreeInput(item.freeInputDeclarations![cp.id].allocationId)}
                                       onReject={() => handleRejectFreeInput(item.freeInputDeclarations![cp.id].allocationId)}
                                     />
                                   )}

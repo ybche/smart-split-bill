@@ -6,6 +6,7 @@ import { logActivity } from "../../lib/activity.js";
 import { uploadBase64Image, UploadValidationError, withSignedProofUrl } from "../../lib/storage.js";
 import { isRateLimited } from "../../lib/rateLimit.js";
 import { normalizeIndonesianPhone } from "../../lib/phone.js";
+import { submitFreeInputDeclaration } from "../../lib/freeInputAllocations.js";
 import { getSlug } from "../../lib/routeSlug.js";
 
 const TYPE_LABELS: Record<string, string> = { bank: "Bank Account", wallet: "E-Wallet", qris: "QRIS" };
@@ -340,26 +341,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // declaration, never someone else's, even if they guess an id.
       const { data: alloc, error: allocError } = await supabaseAdmin
         .from("allocations")
-        .select("*")
+        .select("id, transaction_id, item_id")
         .eq("id", allocationId)
         .eq("participant_id", cp.participant_id)
         .eq("method", "FreeInput")
         .maybeSingle();
       if (allocError) return res.status(500).json({ error: allocError.message });
       if (!alloc) return res.status(404).json({ error: "Deklarasi untuk item ini tidak ditemukan." });
-      // Only an untouched or previously-rejected declaration can be
-      // (re)submitted — one already Pending or Approved must go through the
-      // admin review flow instead of being silently overwritten here.
-      if (alloc.status !== "AwaitingInput" && alloc.status !== "Rejected") {
-        return res.status(400).json({ error: "Deklarasi ini sudah dikirim dan sedang menunggu, atau sudah disetujui." });
-      }
 
       const roundedAmount = Math.round(Number(amount));
-      const { error: updateError } = await supabaseAdmin
-        .from("allocations")
-        .update({ raw_amount: roundedAmount, rounded_amount: roundedAmount, status: "Pending", rejection_reason: null })
-        .eq("id", alloc.id);
-      if (updateError) return res.status(500).json({ error: updateError.message });
+      try {
+        // Takes effect immediately — there is no separate admin-approval
+        // step for the value itself, only for the eventual payment submission.
+        await submitFreeInputDeclaration(allocationId, roundedAmount);
+      } catch (err: any) {
+        return res.status(400).json({ error: err?.message || "Gagal mengirim nominal." });
+      }
 
       await logActivity(null, "transaction", alloc.transaction_id, "free_input_declared", "participant", {
         participantId: cp.participant_id,

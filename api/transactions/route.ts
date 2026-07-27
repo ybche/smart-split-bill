@@ -5,7 +5,7 @@ import { logActivity } from "../../lib/activity.js";
 import { toCamelCase } from "../../lib/caseConvert.js";
 import { calculateSplits } from "../../lib/splitEngine.js";
 import { syncCategoryParticipants } from "../../lib/categoryParticipantSync.js";
-import { createAwaitingInputRows, approveFreeInput, rejectFreeInput } from "../../lib/freeInputAllocations.js";
+import { createAwaitingInputRows, rejectFreeInput } from "../../lib/freeInputAllocations.js";
 import { getSlug } from "../../lib/routeSlug.js";
 
 // Consolidates every /api/transactions/* route into a single serverless
@@ -14,7 +14,9 @@ import { getSlug } from "../../lib/routeSlug.js";
 //   []                          -> GET / POST
 //   [id]                        -> PUT / DELETE
 //   [id, "allocations"]         -> GET
-//   [id, "free-input", allocId] -> POST (approve/reject a participant's item declaration)
+//   [id, "free-input", allocId] -> POST (admin override: reopen a participant's
+//                                  item declaration for them to redo — the
+//                                  value itself needs no approval to count)
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -366,21 +368,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== "POST") return res.status(405).json({ error: "Metode tidak diizinkan" });
 
     const allocationId = slug[2];
-    const { action, rejectionReason } = req.body ?? {};
+    const { rejectionReason } = req.body ?? {};
 
     try {
-      if (action === "approve") {
-        await approveFreeInput(allocationId);
-        await logActivity(admin.id, "transaction", id, "free_input_approved", "admin", { allocationId });
-        return res.json({ success: true });
-      }
-      if (action === "reject") {
-        const reason = rejectionReason || "Nominal tidak sesuai atau tidak dapat diverifikasi.";
-        await rejectFreeInput(allocationId, reason);
-        await logActivity(admin.id, "transaction", id, "free_input_rejected", "admin", { allocationId, reason });
-        return res.json({ success: true });
-      }
-      return res.status(400).json({ error: "Aksi tidak valid. Harus 'approve' atau 'reject'." });
+      const reason = rejectionReason || "Nominal tidak sesuai atau tidak dapat diverifikasi.";
+      await rejectFreeInput(allocationId, reason);
+      await logActivity(admin.id, "transaction", id, "free_input_rejected", "admin", { allocationId, reason });
+      return res.json({ success: true });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || "Gagal memproses deklarasi." });
     }

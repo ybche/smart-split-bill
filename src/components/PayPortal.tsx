@@ -128,6 +128,45 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
     }
   }, [token]);
 
+  // Marks a free-input item Approved with its declared amount directly in
+  // local state — the declaration counts immediately (no admin approval
+  // gate), so there's no need to wait on a round-trip refetch for the
+  // subtotal / selector / everything else to reflect it.
+  const applyFreeInputSubmissionLocally = (allocationId: string, amount: number) => {
+    setPortalData((prev: any) => {
+      if (!prev) return prev;
+
+      const patchList = (list: any[]) => (list || []).map((tx: any) => {
+        let matched = false;
+        const assignedItems = (tx.assignedItems || []).map((it: any) => {
+          if (it.freeInputAllocationId !== allocationId) return it;
+          matched = true;
+          return { ...it, freeInputStatus: "Approved", freeInputRejectionReason: undefined, allocatedAmount: amount };
+        });
+        if (!matched) return { ...tx, assignedItems };
+        return {
+          ...tx,
+          assignedItems,
+          allocationTotal: (tx.allocationTotal || 0) + amount,
+          obligationAmount: (tx.obligationAmount || 0) + amount,
+          remainingAmount: (tx.remainingAmount || 0) + amount,
+        };
+      });
+
+      return {
+        ...prev,
+        payableTransactions: patchList(prev.payableTransactions),
+        outstandingTransactions: patchList(prev.outstandingTransactions),
+        totals: {
+          ...prev.totals,
+          totalOriginalObligation: (prev.totals?.totalOriginalObligation || 0) + amount,
+          remainingPayable: (prev.totals?.remainingPayable || 0) + amount,
+          remaining: (prev.totals?.remaining || 0) + amount,
+        },
+      };
+    });
+  };
+
   const handleSubmitFreeInput = async (allocationId: string) => {
     const raw = freeInputDrafts[allocationId];
     const amount = Number(raw);
@@ -145,13 +184,13 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
       });
 
       if (res.ok) {
-        onShowNotification("Nominal berhasil dikirim, menunggu persetujuan admin.", "success");
+        onShowNotification("Nominal berhasil ditambahkan ke tagihan kamu.", "success");
         setFreeInputDrafts(prev => {
           const next = { ...prev };
           delete next[allocationId];
           return next;
         });
-        await fetchPortalDetails();
+        applyFreeInputSubmissionLocally(allocationId, Math.round(amount));
       } else {
         const err = await res.json();
         onShowNotification(err.error || "Gagal mengirim nominal.", "error");
@@ -164,14 +203,12 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
     }
   };
 
-  // A free-input item's "amount" depends on where its declaration is in the
-  // approve/reject lifecycle: the confirmed amount once approved, what was
-  // already submitted while pending admin review, or whatever's currently
-  // typed (still editable) before that.
+  // A free-input item's "amount" is either the confirmed one (once
+  // declared — there's no separate approval step) or whatever's currently
+  // typed but not yet submitted.
   const getItemEffectiveAmount = (it: any): number => {
     if (!it.isFreeInput) return it.allocatedAmount || 0;
     if (it.freeInputStatus === "Approved") return it.allocatedAmount || 0;
-    if (it.freeInputStatus === "Pending") return it.freeInputDeclaredAmount || 0;
     const draft = Number(freeInputDrafts[it.freeInputAllocationId]);
     return isNaN(draft) ? 0 : draft;
   };
@@ -549,13 +586,6 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                                               </div>
                                             )}
                                           </div>
-
-                                          {it.freeInputStatus === "Pending" && (
-                                            <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px]">
-                                              <span className="text-amber-600 font-mono uppercase tracking-wider">Menunggu Review Admin</span>
-                                              <span className="font-bold text-slate-700 font-mono">{formatIDR(it.freeInputDeclaredAmount)}</span>
-                                            </div>
-                                          )}
 
                                           {(it.freeInputStatus === "AwaitingInput" || it.freeInputStatus === "Rejected") && (
                                             <div className="mt-1.5 space-y-1.5">

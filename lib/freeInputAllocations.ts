@@ -3,10 +3,16 @@ import { supabaseAdmin } from "./supabaseAdmin.js";
 // Free-input allocations let a participant self-declare their own share of a
 // transaction the admin doesn't have exact item/price data for (e.g. cash
 // paid up front with no surviving receipt). They live in the same
-// `allocations` table as normal split-engine rows, tagged
-// method='FreeInput', and cycle through:
-//   AwaitingInput -> (participant submits) -> Pending -> Approved | Rejected
-// Only 'Approved' rows count toward obligation totals anywhere in the app.
+// `allocations` table as normal split-engine rows, tagged method='FreeInput'.
+//
+// There is no admin-approval gate on the value itself -- admin approval only
+// ever applies to the participant's payment submission (the existing
+// payment_submissions Pending Verification -> Paid/Rejected flow), never to
+// how much they say they owe. So the moment a participant submits a number
+// here it's live: AwaitingInput -> (participant submits) -> Approved, and it
+// immediately counts toward obligation totals everywhere. Admin retains a
+// reject action as an override (e.g. a typo'd amount) that reopens the item
+// for the participant to redeclare -- optional, not a required step.
 
 // Creates the initial "please declare your share" placeholder rows for one
 // item within a transaction. Participants who already have a FreeInput row
@@ -59,9 +65,11 @@ async function bumpTransactionTotal(transactionId: string, delta: number): Promi
   if (updateError) throw new Error(updateError.message);
 }
 
-// Approving folds the declared amount into transactions.total so the
-// "Total Amount" column stays an accurate, confirmed figure.
-export async function approveFreeInput(allocationId: string): Promise<void> {
+// Called when a participant declares (or redeclares, after a rejection)
+// their share of a free-input item. Takes effect immediately -- no separate
+// admin approval step -- and folds the amount into transactions.total so
+// the "Total Amount" column stays accurate right away.
+export async function submitFreeInputDeclaration(allocationId: string, amount: number): Promise<void> {
   const { data: alloc, error: fetchError } = await supabaseAdmin
     .from("allocations")
     .select("*")
@@ -70,23 +78,23 @@ export async function approveFreeInput(allocationId: string): Promise<void> {
   if (fetchError) throw new Error(fetchError.message);
   if (!alloc) throw new Error("Deklarasi tidak ditemukan.");
   if (alloc.method !== "FreeInput") throw new Error("Alokasi ini bukan deklarasi input bebas.");
-
-  const wasApproved = alloc.status === "Approved";
+  if (alloc.status !== "AwaitingInput" && alloc.status !== "Rejected") {
+    throw new Error("Deklarasi ini sudah aktif. Minta admin untuk membukanya kembali jika perlu diubah.");
+  }
 
   const { error: updateError } = await supabaseAdmin
     .from("allocations")
-    .update({ status: "Approved", rejection_reason: null })
+    .update({ raw_amount: amount, rounded_amount: amount, status: "Approved", rejection_reason: null })
     .eq("id", allocationId);
   if (updateError) throw new Error(updateError.message);
 
-  if (!wasApproved) {
-    await bumpTransactionTotal(alloc.transaction_id, alloc.rounded_amount);
-  }
+  await bumpTransactionTotal(alloc.transaction_id, amount);
 }
 
-// Rejecting lets the participant declare again (portal shows the reason and
-// re-opens the input field). If this reverses a previously-approved amount,
-// the earlier total bump is undone.
+// Admin override: reopens an item's declaration for the participant to redo,
+// with a reason shown on their portal. Reverses the earlier total bump if
+// the value had already been counted (which, since submission is immediate,
+// is the normal case).
 export async function rejectFreeInput(allocationId: string, reason: string): Promise<void> {
   const { data: alloc, error: fetchError } = await supabaseAdmin
     .from("allocations")
