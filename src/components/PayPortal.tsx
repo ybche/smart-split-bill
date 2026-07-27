@@ -163,16 +163,20 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
 
   const handleSubmitDeclaration = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!termsAccepted) {
-      onShowNotification("You must check the confirmation declare box to submit.", "error");
-      return;
-    }
     if (declaredAmount <= 0) {
-      onShowNotification("Amount declared must be greater than zero.", "error");
+      onShowNotification("Jumlah yang ditransfer harus diisi dan lebih besar dari nol.", "error");
       return;
     }
     if (!selectedMethodId) {
       onShowNotification("Metode pembayaran belum dipilih. Silakan pilih salah satu metode transfer di atas.", "error");
+      return;
+    }
+    if (portalData?.requireProof && !proofBase64) {
+      onShowNotification("Bukti transfer wajib dilampirkan.", "error");
+      return;
+    }
+    if (!termsAccepted) {
+      onShowNotification("Anda harus mencentang kotak pernyataan konfirmasi sebelum mengirim.", "error");
       return;
     }
 
@@ -680,7 +684,7 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
           <div className="p-6 bg-white flex-1">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Submit Transfer Declaration</h3>
             
-            <form onSubmit={handleSubmitDeclaration} className="space-y-4 text-xs">
+            <form onSubmit={handleSubmitDeclaration} noValidate className="space-y-4 text-xs">
               <div>
                 <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Amount Transferred (IDR) *</label>
                 <div className="relative">
