@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { 
-  Plus, Search, Edit3, Trash2, Receipt, Calendar, Info, AlertTriangle, 
-  CheckCircle, PlusCircle, MinusCircle, FileUp, RefreshCw, X, Eye, Sparkles
+import {
+  Plus, Search, Edit3, Trash2, Receipt, Calendar, Info, AlertTriangle,
+  CheckCircle, PlusCircle, MinusCircle, FileUp, RefreshCw, X, Eye, Sparkles,
+  ArrowUp, ArrowDown, ArrowUpDown
 } from "lucide-react";
 import { Transaction, Category, Participant } from "../types";
 
@@ -70,6 +71,8 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
   // Search filter states
   const [searchQuery, setSearchQuery] = useState("");
   const [filterCategoryId, setFilterCategoryId] = useState("all");
+  const [sortBy, setSortBy] = useState<"title" | "category" | "payer" | "classification" | "date" | "total">("date");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const fetchTransactionsData = async () => {
     setLoading(true);
@@ -806,11 +809,53 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
   };
 
   const filteredTransactions = transactions.filter(t => {
-    const matchesSearch = t.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const matchesSearch = t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           (t.merchant && t.merchant.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesCat = filterCategoryId === "all" || t.categoryId === filterCategoryId;
     return matchesSearch && matchesCat;
   });
+
+  const toggleSort = (field: typeof sortBy) => {
+    if (sortBy === field) {
+      setSortOrder(prev => prev === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(field);
+      setSortOrder(field === "date" || field === "total" ? "desc" : "asc");
+    }
+  };
+
+  const payerNameOf = (tx: Transaction) => tx.payerId === "admin" ? "Administrator" : (participants.find(p => p.id === tx.payerId)?.fullName || "");
+  const categoryNameOf = (tx: Transaction) => categories.find(c => c.id === tx.categoryId)?.name || "";
+
+  const sortedTransactions = [...filteredTransactions].sort((a, b) => {
+    let compareVal = 0;
+    switch (sortBy) {
+      case "title":
+        compareVal = a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+        break;
+      case "category":
+        compareVal = categoryNameOf(a).localeCompare(categoryNameOf(b), undefined, { sensitivity: "base" });
+        break;
+      case "payer":
+        compareVal = payerNameOf(a).localeCompare(payerNameOf(b), undefined, { sensitivity: "base" });
+        break;
+      case "classification":
+        compareVal = (a.expenseClassification || "Other").localeCompare(b.expenseClassification || "Other", undefined, { sensitivity: "base" });
+        break;
+      case "date":
+        compareVal = new Date(a.date).getTime() - new Date(b.date).getTime();
+        break;
+      case "total":
+        compareVal = a.total - b.total;
+        break;
+    }
+    return sortOrder === "asc" ? compareVal : -compareVal;
+  });
+
+  const SortIcon = ({ field }: { field: typeof sortBy }) => {
+    if (sortBy !== field) return <ArrowUpDown className="w-3 h-3 opacity-40" />;
+    return sortOrder === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />;
+  };
 
   const allCandidates = [
     ...categoryParticipants,
@@ -872,7 +917,7 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
         <div className="flex justify-center py-20">
           <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
         </div>
-      ) : filteredTransactions.length === 0 ? (
+      ) : sortedTransactions.length === 0 ? (
         <div className="bg-white/[0.01] p-16 border border-white/5 text-center">
           <Receipt className="w-10 h-10 text-white/20 mx-auto mb-3" />
           <p className="text-[#F9F9F7] font-medium text-sm">No Transactions Found</p>
@@ -884,17 +929,41 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
             <table className="w-full text-left border-collapse text-sm">
               <thead className="bg-[#121214]/60 text-[#F9F9F7]/40 text-[10px] font-mono font-bold uppercase tracking-widest border-b border-white/5">
                 <tr>
-                  <th className="px-6 py-4">Title / Merchant</th>
-                  <th className="px-6 py-4">Category</th>
-                  <th className="px-6 py-4">Payer</th>
-                  <th className="px-6 py-4">Classification</th>
-                  <th className="px-6 py-4 text-right">Date</th>
-                  <th className="px-6 py-4 text-right">Total Amount</th>
+                  <th className="px-6 py-4">
+                    <button onClick={() => toggleSort("title")} className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                      Title / Merchant <SortIcon field="title" />
+                    </button>
+                  </th>
+                  <th className="px-6 py-4">
+                    <button onClick={() => toggleSort("category")} className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                      Category <SortIcon field="category" />
+                    </button>
+                  </th>
+                  <th className="px-6 py-4">
+                    <button onClick={() => toggleSort("payer")} className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                      Payer <SortIcon field="payer" />
+                    </button>
+                  </th>
+                  <th className="px-6 py-4">
+                    <button onClick={() => toggleSort("classification")} className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                      Classification <SortIcon field="classification" />
+                    </button>
+                  </th>
+                  <th className="px-6 py-4 text-right">
+                    <button onClick={() => toggleSort("date")} className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors ml-auto">
+                      Date <SortIcon field="date" />
+                    </button>
+                  </th>
+                  <th className="px-6 py-4 text-right">
+                    <button onClick={() => toggleSort("total")} className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors ml-auto">
+                      Total Amount <SortIcon field="total" />
+                    </button>
+                  </th>
                   <th className="px-6 py-4 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {filteredTransactions.map((tx) => {
+                {sortedTransactions.map((tx) => {
                   const cat = categories.find(c => c.id === tx.categoryId);
                   const payer = participants.find(p => p.id === tx.payerId);
                   const payerName = tx.payerId === "admin" ? "Administrator" : (payer ? payer.fullName : "Unknown");
