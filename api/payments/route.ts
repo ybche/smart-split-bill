@@ -5,6 +5,7 @@ import { logActivity } from "../../lib/activity.js";
 import { toCamelCase } from "../../lib/caseConvert.js";
 import { withSignedProofUrl, deleteProofImage, getSignedProofUrl } from "../../lib/storage.js";
 import { recalculatePaymentAllocations } from "../../lib/paymentAllocations.js";
+import { rejectFreeInput } from "../../lib/freeInputAllocations.js";
 import { getSlug } from "../../lib/routeSlug.js";
 
 // Consolidates every /api/payments/* route into a single serverless function
@@ -299,6 +300,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select()
         .single();
       if (updateError) return res.status(500).json({ error: updateError.message });
+
+      // Rejecting the payment means the participant has to redo this
+      // declaration from scratch -- any free-input item they already had
+      // approved within the transactions this payment covered needs to
+      // reopen too, or they'd be stuck resubmitting proof for a number they
+      // can no longer edit.
+      const { data: freeInputAllocs } = await supabaseAdmin
+        .from("allocations")
+        .select("id")
+        .eq("participant_id", sub.participant_id)
+        .eq("method", "FreeInput")
+        .eq("status", "Approved")
+        .in("transaction_id", sub.selected_obligations || []);
+      for (const alloc of freeInputAllocs ?? []) {
+        await rejectFreeInput(alloc.id, reason);
+      }
 
       await logActivity(admin.id, "payment", id, "rejected", "admin", { reason });
       return res.json(toCamelCase(await withSignedProofUrl(updated)));
