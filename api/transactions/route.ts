@@ -304,16 +304,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (fetchError) return res.status(500).json({ error: fetchError.message });
       if (!existing) return res.status(404).json({ error: "Transaksi tidak ditemukan." });
 
+      // Paid AND Pending Verification submissions both need to be accounted
+      // for -- a dangling Pending Verification row left pointing at a deleted
+      // transaction still counts its full submitted_amount against the
+      // participant's pendingPaidTotal in the portal forever (nothing else
+      // ever clears it), silently zeroing out their real remaining balance.
       const { data: paidSubs, error: subsError } = await supabaseAdmin
         .from("payment_submissions")
         .select("id, selected_obligations")
-        .eq("status", "Paid")
+        .in("status", ["Paid", "Pending Verification"])
         .contains("selected_obligations", [id]);
       if (subsError) return res.status(500).json({ error: subsError.message });
 
       if (paidSubs.length > 0 && !force) {
         return res.status(400).json({
-          error: "Tidak dapat menghapus transaksi. Ada catatan pembayaran terverifikasi yang mereferensikan transaksi ini.",
+          error: "Tidak dapat menghapus transaksi. Ada catatan pembayaran (terverifikasi atau menunggu verifikasi) yang mereferensikan transaksi ini.",
           canForce: true,
         });
       }

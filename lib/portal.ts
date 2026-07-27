@@ -220,7 +220,23 @@ export async function getPortalData(token: string) {
     }
   }
 
-  const rawPaymentHistory = allSubmissions ?? [];
+  // A payment submission whose selected_obligations transaction(s) have since
+  // been deleted (e.g. admin removed a test transaction after the
+  // participant already declared a payment for it) would otherwise still
+  // count its full submitted_amount against verifiedPaidTotal/pendingPaidTotal
+  // forever, with nothing left to ever clear it -- silently zeroing out the
+  // participant's real remaining balance. Drop submissions that reference no
+  // transaction that still exists.
+  const referencedTxIds = Array.from(new Set((allSubmissions ?? []).flatMap((ps: any) => ps.selected_obligations || [])));
+  const { data: existingTxRows } = await supabaseAdmin
+    .from("transactions")
+    .select("id")
+    .in("id", referencedTxIds.length ? referencedTxIds : ["00000000-0000-0000-0000-000000000000"]);
+  const existingTxIds = new Set((existingTxRows ?? []).map((t: any) => t.id));
+
+  const rawPaymentHistory = (allSubmissions ?? []).filter((ps: any) =>
+    (ps.selected_obligations || []).some((txId: string) => existingTxIds.has(txId))
+  );
   const verifiedPaidTotal = rawPaymentHistory.filter((ps: any) => ps.status === "Paid").reduce((sum: number, ps: any) => sum + ps.submitted_amount, 0);
   const pendingPaidTotal = rawPaymentHistory
     .filter((ps: any) => ps.status === "Pending Verification")
