@@ -553,9 +553,19 @@ export default function PayPortal({ token, onShowNotification }: PayPortalProps)
                         >
                           {/* Left: Nama Transaksi (hitam bold) & Merchant / Tempat (warna abu) */}
                           <div className="flex-1 min-w-0">
-                            <span className="font-bold text-slate-900 text-sm block truncate">
-                              {tx.title || tx.merchant || "Transaksi"}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-slate-900 text-sm truncate">
+                                {tx.title || tx.merchant || "Transaksi"}
+                              </span>
+                              {(tx.assignedItems || []).some((it: any) => it.isFreeInput && it.freeInputStatus !== "Approved") && (
+                                <span
+                                  className="text-[9px] font-mono font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded shrink-0"
+                                  title="Ada item yang nominalnya perlu kamu isi sendiri — buka Rincian untuk mengisinya"
+                                >
+                                  Perlu Isi Free Input
+                                </span>
+                              )}
+                            </div>
                             <span className="text-xs text-slate-500 block mt-0.5 truncate">
                               {tx.merchant && tx.merchant !== tx.title ? tx.merchant : (tx.categoryName ? `Kategori: ${tx.categoryName}` : "")}
                             </span>
