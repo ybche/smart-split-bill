@@ -1066,9 +1066,17 @@ export default function Transactions({ token, onNavigate, onShowNotification }: 
                           {!!tx.pendingFreeInputCount && (
                             <span
                               className="text-[9px] font-mono font-bold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/30 px-1.5 py-0.5"
-                              title="Deklarasi peserta menunggu persetujuan — buka & edit transaksi ini untuk meninjau"
+                              title="Ada item input bebas yang belum/gagal diisi peserta — total transaksi ini belum mencerminkan nominal tersebut"
                             >
-                              {tx.pendingFreeInputCount} Menunggu
+                              {tx.pendingFreeInputCount} Menunggu Peserta
+                            </span>
+                          )}
+                          {!tx.pendingFreeInputCount && tx.hasFreeInput && (
+                            <span
+                              className="text-[9px] font-mono font-bold uppercase tracking-wider bg-sky-500/10 text-sky-400 border border-sky-500/30 px-1.5 py-0.5"
+                              title="Transaksi ini punya item yang nominalnya ditentukan sendiri oleh peserta"
+                            >
+                              Free Input
                             </span>
                           )}
                         </div>

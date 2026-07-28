@@ -76,6 +76,7 @@ export interface Transaction {
   // Count of this transaction's free-input item declarations awaiting admin
   // review (status='Pending'). Only present on the list endpoint response.
   pendingFreeInputCount?: number;
+  hasFreeInput?: boolean;
 }
 
 export interface TransactionItem {

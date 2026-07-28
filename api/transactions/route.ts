@@ -25,22 +25,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (slug.length === 0) {
     if (req.method === "GET") {
-      const [{ data, error }, { data: pendingAllocs }] = await Promise.all([
+      const [{ data, error }, { data: freeInputAllocs }] = await Promise.all([
         supabaseAdmin.from("transactions").select("*").order("created_at", { ascending: false }),
-        supabaseAdmin.from("allocations").select("transaction_id").eq("method", "FreeInput").eq("status", "Pending"),
+        supabaseAdmin.from("allocations").select("transaction_id, status").eq("method", "FreeInput"),
       ]);
       if (error) return res.status(500).json({ error: error.message });
 
-      // Lets the Transactions list surface which rows have a participant
-      // declaration awaiting review, without a separate admin page.
-      const pendingCountByTx = new Map<string, number>();
-      (pendingAllocs ?? []).forEach((a: any) => {
-        pendingCountByTx.set(a.transaction_id, (pendingCountByTx.get(a.transaction_id) || 0) + 1);
+      // Lets the Transactions list mark which rows use free input at all, and
+      // separately flag ones still waiting on the participant to declare (or
+      // redeclare after a rejection) -- otherwise a transaction sitting at
+      // "Rp 0" with no declared items yet looks like a data-entry mistake.
+      const freeInputCountByTx = new Map<string, number>();
+      const unresolvedCountByTx = new Map<string, number>();
+      (freeInputAllocs ?? []).forEach((a: any) => {
+        freeInputCountByTx.set(a.transaction_id, (freeInputCountByTx.get(a.transaction_id) || 0) + 1);
+        if (a.status === "AwaitingInput" || a.status === "Rejected") {
+          unresolvedCountByTx.set(a.transaction_id, (unresolvedCountByTx.get(a.transaction_id) || 0) + 1);
+        }
       });
 
       const enriched = (data ?? []).map((t: any) => ({
         ...toCamelCase(t),
-        pendingFreeInputCount: pendingCountByTx.get(t.id) || 0,
+        hasFreeInput: (freeInputCountByTx.get(t.id) || 0) > 0,
+        pendingFreeInputCount: unresolvedCountByTx.get(t.id) || 0,
       }));
       return res.json(enriched);
     }
